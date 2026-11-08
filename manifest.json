@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "sd.calendar",
   "name": "Dottie Calendar",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "author": "sd",
   "license": "MIT",
   "description": "Dottie Calendar. Day, week, month, year. Almanac events plus ICS feeds. Search dottie or calendar.",

@@ -77,6 +77,34 @@ series_start=$(day "-1 day")
 skip=$(day "+6 days")
 sub() { python3 -c 'import json,sys; print([r["subscribe"] for r in json.load(open(sys.argv[1])) if r["name"] == sys.argv[2]][0])' "$work/creds.json" "$1"; }
 
+# A weekly series at 09:00 Los Angeles; its second date is the one skipped.
+week1=$(day "+1 day")
+week2=$(day "+8 days")
+week3=$(day "+15 days")
+# A Los Angeles wall clock as the calendar shows it: local "YYYY-MM-DD HH:MM".
+shown() {
+  python3 -c 'import sys; from datetime import datetime; from zoneinfo import ZoneInfo
+print(datetime.fromisoformat(sys.argv[1]).replace(tzinfo=ZoneInfo("America/Los_Angeles")).astimezone().strftime("%Y-%m-%d %H:%M"))' "$1"
+}
+# The exdates GET changes reports for one event, opened when sealed.
+changes_exdates() {
+  ALMANAC_CREDS="$work/creds.json" python3 - "$work/creds.json" "$1" "$2" "$BIN" <<'PY'
+import hashlib, json, subprocess, sys, urllib.request
+creds, name, uid, binary = sys.argv[1:]
+row = [r for r in json.load(open(creds)) if r["name"] == name][0]
+token = hashlib.sha256((row["key"] + "almanac-auth-v1").encode()).hexdigest()
+url = row["write"].rsplit("/events", 1)[0] + "/changes?since=0"
+req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
+events = json.load(urllib.request.urlopen(req))["events"]
+ev = [e for e in events if e["uid"] == uid][0]
+if ev.get("seal"):
+    plain = subprocess.run([binary, "open", "--cal", row["id"], "--kind", "event", "--uid", uid],
+                           input=ev["seal"].encode(), capture_output=True, check=True).stdout
+    ev = json.loads(plain)
+print(ev.get("exdates"))
+PY
+}
+
 for feed in plain seal; do
   cal=$(cat "$work/$feed.id")
   printf '{"summary":"Dentist","start":"%s","end":"%s"}' "$(at "$d1" 09:00:00)" "$(at "$d1" 09:45:00)" >"$work/body.json"
@@ -127,7 +155,27 @@ for feed in plain seal; do
   check "$feed: delete with rev" "$(cat "$work/out")" '{"ok":true}'
   run post --cal "$cal" --rev "$drev" --body-file "$work/body.json"
   check "$feed: update of a deleted event is a conflict" "$(cat "$work/out")" "ERROR:conflict"
+
+  # Delete one date of a weekly series: an exdate on that uid, the rest stays.
+  printf '{"uid":"weekly","summary":"Weekly","start":"%sT09:00:00","end":"%sT09:30:00","timeZone":"America/Los_Angeles","rrule":"FREQ=WEEKLY"}' "$week1" "$week1" >"$work/body.json"
+  run post --cal "$cal" --body-file "$work/body.json"
+  wrev=$(field 'd["rev"]')
+  read -r skip_d skip_t <<<"$(shown "${week2}T09:00:00")"
+  run skip --cal "$cal" --uid weekly --date "$skip_d" --time "$skip_t" --rev "$wrev"
+  check "$feed: skip one date" "$?" "0"
+  check "$feed: skip adds the exdate, keeps the rule" "$(field '(d.get("exdates"), d.get("rrule"), d["start"][:10])')" "(['${week2}T09:00:00'], 'FREQ=WEEKLY', '$week1')"
+  run skip --cal "$cal" --uid weekly --date "$skip_d" --time "$skip_t" --rev "$wrev"
+  check "$feed: stale rev skip is a conflict" "$(cat "$work/out")" "ERROR:conflict"
+  run list --cal "$cal"
+  check "$feed: the series is still there" "$(field '[(e.get("exdates"), e.get("rrule")) for e in d["events"] if e["uid"] == "weekly"]')" "[(['${week2}T09:00:00'], 'FREQ=WEEKLY')]"
+  RUN_STDIN="$work/url" run ics
+  check "$feed: ics skips that date" "$(grep -c "^EXDATE;VALUE=DATE:${skip_d//-/}" "$work/out")" "1"
+  check "$feed: changes show the exdate" "$(changes_exdates "$feed" weekly)" "['${week2}T09:00:00']"
 done
+
+# A plain feed drops exactly that occurrence, in the series' zone.
+check "plain: feed has the exdate" "$(curl -s "$(sub plain)" | grep -c "^EXDATE;TZID=America/Los_Angeles:${week2//-/}T090000")" "1"
+check "seal: feed shows only the seal" "$(curl -s "$(sub seal)" | grep -c '^EXDATE')" "0"
 
 printf 'https://example.com/other.ics\n' >"$work/url"
 RUN_STDIN="$work/url" run ics
@@ -155,6 +203,26 @@ d = json.load(open(sys.argv[1]))
 rows = [e for e in d["events"] if e["title"] == "Standup v2"]
 print(sorted({e["calendarId"] for e in rows}), all(e.get("rev") for e in rows), len(rows) > 20, rows[0]["start"] != "")' "$store")" "['plain', 'seal'] True True True"
 check "the feed URL never reached curl" "$(grep -c '/feed/' "$work/curl-argv.log")" "0"
+read -r w1 _ <<<"$(shown "${week1}T09:00:00")"
+read -r w2 _ <<<"$(shown "${week2}T09:00:00")"
+read -r w3 _ <<<"$(shown "${week3}T09:00:00")"
+check "the skipped date is gone, the others stay, all marked repeating" "$(python3 -c 'import json,sys
+d = json.load(open(sys.argv[1]))
+for cal in ("plain", "seal"):
+    rows = [e for e in d["events"] if e["title"] == "Weekly" and e["calendarId"] == cal]
+    keys = {e["dateKey"] for e in rows}
+    print(cal, sys.argv[2] in keys, sys.argv[3] in keys, sys.argv[4] in keys, all(e.get("repeats") for e in rows))' "$store" "$w1" "$w2" "$w3" | tr '\n' ' ')" "plain True False True True seal True False True True "
+
+# Deleting all dates still deletes the series.
+for feed in plain seal; do
+  cal=$(cat "$work/$feed.id")
+  run list --cal "$cal"
+  wrev=$(field '[e["rev"] for e in d["events"] if e["uid"] == "weekly"][0]')
+  run delete --cal "$cal" --uid weekly --rev "$wrev"
+  check "$feed: delete all dates" "$(cat "$work/out")" '{"ok":true}'
+  run list --cal "$cal"
+  check "$feed: the series is gone" "$(field '[e for e in d["events"] if e["uid"] == "weekly"]')" "[]"
+done
 
 rm -f "$work/watch"
 wait "$watcher" 2>/dev/null

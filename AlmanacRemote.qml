@@ -39,6 +39,13 @@ Item {
     enqueue("delete", withRev(["delete", "--cal", String(calId || ""), "--uid", String(uid || "")], rev), jobToken)
   }
 
+  // One date of a repeating event: date YYYY-MM-DD and time HH:MM ("" all-day), as shown.
+  function skip(calId, uid, date, time, jobToken, rev) {
+    var args = ["skip", "--cal", String(calId || ""), "--uid", String(uid || ""), "--date", String(date || "")]
+    if (time) args.push("--time", String(time))
+    enqueue("skip", withRev(args, rev), jobToken)
+  }
+
   function kick() {
     if (inFlight) return
     if (queue.length === 0) return

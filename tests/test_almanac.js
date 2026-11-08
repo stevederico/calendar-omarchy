@@ -267,3 +267,52 @@ test("almanac-events.sh sends --rev as If-Match and maps 412 to conflict", async
     ["DELETE", "/v1/c/cal_test/events/evt-1", '"7"']
   ])
 })
+
+test("occurrenceOf is the shown date and start, repeats reads the flag", () => {
+  assert.deepEqual(Almanac.occurrenceOf({ dateKey: "2026-10-06", start: "12:00", end: "12:15" }), { date: "2026-10-06", time: "12:00" })
+  assert.deepEqual(Almanac.occurrenceOf({ dateKey: "2026-10-06", start: "", allDay: true }), { date: "2026-10-06", time: "" })
+  assert.equal(Almanac.repeats({ repeats: true }), true)
+  assert.equal(Almanac.repeats({}), false)
+})
+
+test("almanac-events.sh skip adds the occurrence's exdate in the series zone", async () => {
+  const events = {
+    weekly: { uid: "weekly", summary: "Standup", start: "2026-09-22T09:00:00", end: "2026-09-22T09:15:00", timeZone: "America/Los_Angeles", rrule: "FREQ=WEEKLY", rev: 9,
+      overrides: [{ recurrenceId: "2026-10-13T09:00:00", start: "2026-10-14T10:00:00", end: "2026-10-14T10:15:00" }] },
+    allday: { uid: "allday", summary: "Bins", start: "2026-09-22", allDay: true, rrule: "FREQ=WEEKLY", rev: 4 },
+    once: { uid: "once", summary: "Dentist", start: "2026-09-22T09:00:00-07:00", rev: 3 }
+  }
+  const seen = []
+  const server = http.createServer((req, res) => {
+    let raw = ""
+    req.on("data", (c) => { raw += c })
+    req.on("end", () => {
+      seen.push({ method: req.method, url: req.url, ifMatch: req.headers["if-match"], body: raw })
+      res.writeHead(200, { "content-type": "application/json" })
+      if (req.url === "/v1/c/cal_test") return res.end(JSON.stringify({ id: "cal_test", feed: "plain" }))
+      const uid = req.url.split("/")[5]
+      res.end(JSON.stringify(events[uid]))
+    })
+  })
+  const port = await listen(server)
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dottie-cal-"))
+  const env = { ALMANAC_CONFIG: writeConfig(dir, port), TZ: "America/New_York" }
+  const run = (...args) => runScript(["skip", "--cal", "cal_test", ...args], env)
+  // 09:00 in Los Angeles shows as 12:00 in New York.
+  const timed = await run("--uid", "weekly", "--date", "2026-10-06", "--time", "12:00", "--rev", "9")
+  const moved = await run("--uid", "weekly", "--date", "2026-10-14", "--time", "13:00", "--rev", "9")
+  const allDay = await run("--uid", "allday", "--date", "2026-10-06")
+  const stale = await run("--uid", "weekly", "--date", "2026-10-06", "--time", "12:00", "--rev", "8")
+  const once = await run("--uid", "once", "--date", "2026-09-22", "--time", "12:00")
+  server.close()
+  fs.rmSync(dir, { recursive: true, force: true })
+  for (const r of [timed, moved, allDay]) assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.equal(stale.stdout, "ERROR:conflict\n")
+  assert.equal(once.stdout, "ERROR:not a repeating event\n")
+  const writes = seen.filter((row) => row.method !== "GET")
+  assert.deepEqual(writes.map((row) => [row.method, row.url, row.ifMatch, JSON.parse(row.body).recurrenceId]), [
+    ["PUT", "/v1/c/cal_test/events/weekly/exdates", '"9"', "2026-10-06T09:00:00"],
+    ["PUT", "/v1/c/cal_test/events/weekly/exdates", '"9"', "2026-10-13T09:00:00"],
+    ["PUT", "/v1/c/cal_test/events/allday/exdates", '"4"', "2026-10-06"]
+  ])
+})

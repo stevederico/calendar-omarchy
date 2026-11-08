@@ -4,8 +4,10 @@
 #
 #   list                               events as JSON, sealed ones opened
 #   post   --body-file FILE [--rev N]  a body with a uid updates that event
-#   delete --uid UID [--rev N]
-#   feed                               the calendar's subscribe URL
+#   delete --uid UID [--rev N]         the event, or every date of a series
+#   skip   --uid UID --date YYYY-MM-DD [--time HH:MM] [--rev N]
+#                                      one date of a repeating event
+#   feed                             the calendar's subscribe URL
 #   ics                                read a subscribe URL on stdin; print that
 #                                      calendar's events as ICS (exit 3: not Almanac)
 #
@@ -15,6 +17,14 @@
 # would move the whole series. Prints JSON on success, `ERROR:<text>`
 # otherwise. A stale --rev, or one for an event deleted since, prints
 # `ERROR:conflict`.
+#
+# skip takes the date and start time the calendar shows (local time) and adds
+# that occurrence's recurrence id to the event's exdates: the series' wall
+# clock in its time zone, or YYYY-MM-DD when all-day, so the feed drops exactly
+# that date. A moved date (override) is skipped by its own recurrence id. A
+# plain calendar uses the exdates route. A sealed calendar's server refuses
+# that route and cannot read the event, so there the exdate lives inside the
+# seal: open, add, seal again, PUT with If-Match.
 set -u
 
 fail() {
@@ -31,10 +41,12 @@ CAL=""
 ITEM=""
 BODYFILE=""
 REV=""
+DATE=""
+TIME=""
 
 while (( $# > 0 )); do
   case "$1" in
-    list|post|delete|feed|ics)
+    list|post|delete|skip|feed|ics)
       [[ -z $CMD ]] || fail "usage"
       CMD="$1"
       shift
@@ -43,6 +55,8 @@ while (( $# > 0 )); do
     --uid) ITEM="${2-}"; shift 2 ;;
     --body-file) BODYFILE="${2-}"; shift 2 ;;
     --rev) REV="${2-}"; shift 2 ;;
+    --date) DATE="${2-}"; shift 2 ;;
+    --time) TIME="${2-}"; shift 2 ;;
     -*) fail "unknown option" ;;
     *) fail "usage" ;;
   esac
@@ -52,8 +66,12 @@ done
 if [[ $CMD == post ]]; then
   [[ -n $BODYFILE && -f $BODYFILE ]] || fail "body file required"
 fi
-if [[ $CMD == delete ]]; then
+if [[ $CMD == delete || $CMD == skip ]]; then
   [[ -n $ITEM ]] || fail "uid required"
+fi
+if [[ $CMD == skip ]]; then
+  [[ $DATE =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || fail "date required"
+  [[ -z $TIME || $TIME =~ ^[0-9]{2}:[0-9]{2}$ ]] || fail "bad time"
 fi
 [[ -z $REV || $REV =~ ^[0-9]+$ ]] || fail "bad rev"
 
@@ -216,6 +234,9 @@ for ev in data.get("events") or []:
         lines += ["BEGIN:VEVENT", "UID:" + str(ev["uid"]), "SUMMARY:" + esc(o.get("summary") or ev.get("summary") or "Untitled")]
         if rev:
             lines.append("X-ALMANAC-REV:" + rev)
+        rid = local(o.get("recurrenceId"), tz)
+        if rid:
+            lines.append("RECURRENCE-ID;VALUE=DATE:" + rid[0])
         lines += dt_lines(o_start, local(o.get("end"), tz), all_day) + ["END:VEVENT"]
 lines.append("END:VCALENDAR")
 sys.stdout.write("\r\n".join(lines) + "\r\n")'
@@ -258,6 +279,75 @@ for k in owned:
 json.dump(out, open(sys.argv[3], "w"))' "$1" "$2" "$3"
 }
 
+# skip_event CURRENT DATE TIME OUT: writes the event with that shown date in
+# its exdates (and no override for it) to OUT, and prints the recurrence id.
+skip_event() {
+  python3 -c 'import json, sys
+from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
+
+ev = json.load(open(sys.argv[1]))
+day, hm, out = sys.argv[2], sys.argv[3], sys.argv[4]
+if not ev.get("rrule"):
+    sys.exit("not a repeating event")
+zone = None
+if ev.get("timeZone") and ZoneInfo:
+    try:
+        zone = ZoneInfo(ev["timeZone"])
+    except Exception:
+        zone = None
+start = str(ev.get("start") or "")
+all_day = bool(ev.get("allDay")) or len(start) == 10
+
+# A timed value as an aware datetime: floating ones in the series zone, else local.
+def parse(text):
+    dt = datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=zone) if zone else dt.astimezone()
+    return dt
+
+# (YYYY-MM-DD, HH:MM) as the calendar shows it, in local time.
+def shown(text):
+    text = str(text or "")
+    if len(text) == 10:
+        return text, ""
+    dt = parse(text).astimezone()
+    return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M")
+
+rid = ""
+moved = [o for o in ev.get("overrides") or [] if isinstance(o, dict)]
+for o in moved:
+    try:
+        d, t = shown(o.get("start"))
+    except ValueError:
+        continue
+    if d == day and (all_day or not hm or t == hm):
+        rid = str(o.get("recurrenceId") or "")
+        break
+if not rid and all_day:
+    rid = day
+if not rid:
+    # The shown date and time, back in the series zone. The time of day is the
+    # series start there, so the id is the one the server and the feed use.
+    series = parse(start)
+    if zone:
+        series = series.astimezone(zone)
+    when = datetime.fromisoformat(day + "T" + (hm or series.astimezone().strftime("%H:%M")))
+    when = when.astimezone().astimezone(series.tzinfo)
+    rid = when.strftime("%Y-%m-%d") + "T" + series.strftime("%H:%M:%S")
+ev["exdates"] = sorted(set(str(x) for x in ev.get("exdates") or []) | {rid})
+kept = [o for o in moved if str(o.get("recurrenceId") or "") != rid]
+if kept:
+    ev["overrides"] = kept
+else:
+    ev.pop("overrides", None)
+json.dump(ev, open(out, "w"))
+print(rid)' "$1" "$2" "$3" "$4"
+}
+
 case "$CMD" in
   list)
     request GET "$EVENTS"
@@ -273,6 +363,33 @@ case "$CMD" in
     ;;
   delete)
     request DELETE "$EVENTS/$ITEM" "" "$REV"
+    finish
+    ;;
+  skip)
+    FEED=$(almanac_feed) || fail "Almanac request failed"
+    request GET "$EVENTS/$ITEM"
+    [[ $CODE == 404 && -n $REV ]] && fail "conflict"
+    [[ $CODE == 200 ]] || finish
+    CURRENT=$(almanac_tmp) || fail "Almanac request failed"
+    almanac_open event <"$OUT" >"$CURRENT" || fail "sealed calendar needs the almanac binary"
+    read -r UNREADABLE BASE_REV < <(python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+print("1" if d.get("unreadable") else "0", d.get("rev") or "")' "$CURRENT")
+    [[ $UNREADABLE == 0 ]] || fail "could not open the seal"
+    # The server checks If-Match on events/{uid} only, not on its exdates
+    # route, so a stale --rev is caught here as well.
+    [[ -z $REV || $REV == "$BASE_REV" ]] || fail "conflict"
+    SKIPPED=$(almanac_tmp) || fail "Almanac request failed"
+    RID=$(skip_event "$CURRENT" "$DATE" "$TIME" "$SKIPPED" 2>&1) || fail "${RID:-bad event}"
+    if [[ $FEED == seal ]]; then
+      SEALED=$(almanac_tmp) || fail "Almanac request failed"
+      almanac_seal_body event "$ITEM" "$SKIPPED" "$SEALED" || fail "could not seal the event"
+      request PUT "$EVENTS/$ITEM" "$SEALED" "$BASE_REV"
+    else
+      BODY=$(almanac_tmp) || fail "Almanac request failed"
+      python3 -c 'import json, sys; json.dump({"recurrenceId": sys.argv[1]}, open(sys.argv[2], "w"))' "$RID" "$BODY" || fail "bad event"
+      request PUT "$EVENTS/$ITEM/exdates" "$BODY" "$BASE_REV"
+    fi
     finish
     ;;
   post)

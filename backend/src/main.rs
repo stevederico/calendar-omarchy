@@ -138,6 +138,7 @@ fn cmd_add(args: Vec<String>) -> Result<(), String> {
         start,
         end: String::new(),
         rev: String::new(),
+        repeats: false,
         color: store
             .calendars
             .iter()

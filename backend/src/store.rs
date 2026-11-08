@@ -22,6 +22,8 @@ pub struct Event {
     pub all_day: bool,
     /// Almanac rev of the event this row came from; empty for other feeds.
     pub rev: String,
+    /// One date of a repeating event (or a moved date of one).
+    pub repeats: bool,
 }
 
 #[derive(Clone)]
@@ -143,6 +145,9 @@ pub fn encode(store: &Store) -> String {
             out.push_str(",\"rev\":\"");
             out.push_str(&escape(&event.rev));
             out.push('"');
+        }
+        if event.repeats {
+            out.push_str(",\"repeats\":true");
         }
         out.push('}');
     }
@@ -393,6 +398,7 @@ impl<'a> Parser<'a> {
                 color: String::new(),
                 all_day: false,
                 rev: String::new(),
+                repeats: false,
             };
             for (k, v) in fields {
                 match (k.as_str(), v) {
@@ -405,6 +411,7 @@ impl<'a> Parser<'a> {
                     ("color", Value::Str(s)) => event.color = s,
                     ("allDay", Value::Bool(b)) => event.all_day = b,
                     ("rev", Value::Str(s)) => event.rev = s,
+                    ("repeats", Value::Bool(b)) => event.repeats = b,
                     _ => {}
                 }
             }
@@ -488,4 +495,33 @@ fn escape(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeats_survives_a_save() {
+        let mut store = Store::default();
+        for (uid, repeats) in [("standup", true), ("dentist", false)] {
+            store.events.push(Event {
+                id: format!("a:{uid}:2026-10-06"),
+                calendar_id: "a".into(),
+                date_key: "2026-10-06".into(),
+                title: uid.into(),
+                start: "09:00".into(),
+                end: "09:15".into(),
+                color: LOCAL_COLOR.into(),
+                all_day: false,
+                rev: "7".into(),
+                repeats,
+            });
+        }
+        let text = encode(&store);
+        assert_eq!(text.matches("\"repeats\":true").count(), 1);
+        let back = parse_store(&text).unwrap();
+        let flags: Vec<bool> = back.events.iter().map(|e| e.repeats).collect();
+        assert_eq!(flags, vec![true, false]);
+    }
 }

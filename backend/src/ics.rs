@@ -10,6 +10,8 @@ struct RawEvent {
     start_hm: String,
     end_hm: String,
     rrule: Option<RRule>,
+    /// A moved date of a series (RECURRENCE-ID): no RRULE of its own.
+    moved: bool,
     exdates: Vec<i32>,
     seal: String,
     rev: String,
@@ -80,6 +82,7 @@ pub fn events_from_ics(
                 color: color.into(),
                 all_day: raw.all_day,
                 rev: raw.rev.clone(),
+                repeats: raw.rrule.is_some() || raw.moved,
             });
         }
     }
@@ -102,6 +105,7 @@ fn parse_vevents(ics: &str) -> Vec<RawEvent> {
                 start_hm: String::new(),
                 end_hm: String::new(),
                 rrule: None,
+                moved: false,
                 exdates: Vec::new(),
                 seal: String::new(),
                 rev: String::new(),
@@ -128,6 +132,7 @@ fn parse_vevents(ics: &str) -> Vec<RawEvent> {
             "DTSTART" => apply_dt(event, &params, &value, true),
             "DTEND" => apply_dt(event, &params, &value, false),
             "RRULE" => event.rrule = parse_rrule(&value),
+            "RECURRENCE-ID" => event.moved = true,
             "EXDATE" => {
                 for part in value.split(',') {
                     if let Some(c) = parse_ics_date(part.trim()) {
@@ -595,5 +600,47 @@ END:VEVENT\n";
         let events = events_from_ics(ics, "us", "#5b9fd4", start, end);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].date_key, "2026-01-01");
+        assert!(events[0].repeats);
+    }
+
+    #[test]
+    fn series_dates_and_moved_dates_repeat_others_do_not() {
+        let ics = "BEGIN:VEVENT\n\
+UID:standup\n\
+DTSTART:20261006T090000\n\
+RRULE:FREQ=WEEKLY\n\
+EXDATE;VALUE=DATE:20261013,20261020\n\
+SUMMARY:Standup\n\
+END:VEVENT\n\
+BEGIN:VEVENT\n\
+UID:standup\n\
+RECURRENCE-ID;VALUE=DATE:20261020\n\
+DTSTART:20261021T100000\n\
+SUMMARY:Standup\n\
+END:VEVENT\n\
+BEGIN:VEVENT\n\
+UID:dentist\n\
+DTSTART:20261008T090000\n\
+SUMMARY:Dentist\n\
+END:VEVENT\n";
+        let start = ordinal(Civil { y: 2026, m: 10, d: 1 });
+        let end = ordinal(Civil { y: 2026, m: 10, d: 31 });
+        let events = events_from_ics(ics, "a", "#5b9fd4", start, end);
+        let keys = |uid: &str| -> Vec<(String, bool)> {
+            events
+                .iter()
+                .filter(|e| e.id.contains(&format!(":{uid}:")))
+                .map(|e| (e.date_key.clone(), e.repeats))
+                .collect()
+        };
+        assert_eq!(
+            keys("standup"),
+            vec![
+                ("2026-10-06".to_string(), true),
+                ("2026-10-27".to_string(), true),
+                ("2026-10-21".to_string(), true),
+            ]
+        );
+        assert_eq!(keys("dentist"), vec![("2026-10-08".to_string(), false)]);
     }
 }

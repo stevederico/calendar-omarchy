@@ -1,3 +1,11 @@
+0.8.0
+
+  Delete one date
+  Ask date or series
+  Seal sealed exdates
+  Mark repeating events
+  Test skipped dates
+
 0.7.0
 
   Keep conflict copies

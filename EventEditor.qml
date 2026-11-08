@@ -11,6 +11,9 @@ Item {
   readonly property string fontFamily: host ? host.contentFontFamily : Style.font.family
   readonly property bool isNew: !event || !event.id
   readonly property bool canWrite: host && host.canEditEvent(event)
+  readonly property bool repeats: !!(event && event.repeats)
+  // Delete on a repeating event asks: this date, or all dates.
+  property bool askDelete: false
 
   visible: event !== null
   z: 40
@@ -23,6 +26,7 @@ Item {
   onVisibleChanged: if (visible) fill()
 
   function fill() {
+    askDelete = false
     if (!event) return
     titleField.text = event.title || ""
     dateField.text = event.dateKey || (host ? host.selectedKey : "")
@@ -239,6 +243,72 @@ Item {
       }
 
       Row {
+        visible: root.askDelete
+        spacing: Style.space(16)
+
+        Text {
+          text: "Delete"
+          color: Qt.darker(root.fg, 1.5)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          topPadding: Style.space(4)
+          bottomPadding: Style.space(4)
+        }
+
+        Text {
+          text: host && host.eventSaving ? "Deleting" : "This date"
+          color: oneMouse.containsMouse ? Color.urgent : root.fg
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          font.bold: true
+          topPadding: Style.space(4)
+          bottomPadding: Style.space(4)
+          MouseArea {
+            id: oneMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: if (root.host && !root.host.eventSaving) root.host.deleteEvent(root.draft(), false)
+          }
+        }
+
+        Text {
+          text: "All dates"
+          color: allMouse.containsMouse ? Color.urgent : Qt.darker(root.fg, 1.35)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          topPadding: Style.space(4)
+          bottomPadding: Style.space(4)
+          MouseArea {
+            id: allMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: if (root.host && !root.host.eventSaving) root.host.deleteEvent(root.draft(), true)
+          }
+        }
+
+        Text {
+          text: "Back"
+          color: backMouse.containsMouse
+            ? Style.hoverStateColor(root.fg, Color.accent)
+            : Qt.darker(root.fg, 1.45)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          topPadding: Style.space(4)
+          bottomPadding: Style.space(4)
+          MouseArea {
+            id: backMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.askDelete = false
+          }
+        }
+      }
+
+      Row {
+        visible: !root.askDelete
         spacing: Style.space(16)
 
         Text {
@@ -274,7 +344,11 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: if (root.host && !root.host.eventSaving) root.host.deleteEvent(root.draft())
+            onClicked: {
+              if (!root.host || root.host.eventSaving) return
+              if (root.repeats) root.askDelete = true
+              else root.host.deleteEvent(root.draft(), true)
+            }
           }
         }
 

@@ -146,6 +146,18 @@ function sameWhen(event, draft) {
   return allDay || (trim(draft.start) === was.start && trim(draft.end) === was.end)
 }
 
+// True for one date of a repeating event (sd-calendar marks it `repeats`).
+function repeats(event) {
+  return !!(event && event.repeats)
+}
+
+// The date (and start time, "" when all-day) the calendar shows for one
+// occurrence: what `almanac-events.sh skip` takes as --date and --time.
+function occurrenceOf(event) {
+  var allDay = !!(event && (event.allDay || !event.start))
+  return { date: trim(event && event.dateKey), time: allDay ? "" : trim(event.start) }
+}
+
 // The body that saves an edit the server refused as a new event.
 function conflictCopy(body) {
   var suffix = " (conflict copy)"
@@ -188,6 +200,8 @@ if (typeof module !== "undefined") {
     editorWhen: editorWhen,
     sameWhen: sameWhen,
     conflictCopy: conflictCopy,
+    repeats: repeats,
+    occurrenceOf: occurrenceOf,
     errorMessage: errorMessage
   }
 }

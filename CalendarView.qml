@@ -297,14 +297,23 @@ Item {
     rmProc.running = true
   }
 
-  function deleteEvent(draft) {
+  // allDates: delete the whole series. Otherwise a repeating event skips only
+  // the date it was opened on (an exdate); a single event is deleted.
+  function deleteEvent(draft, allDates) {
     var uid = Almanac.eventUid(draft) || (editingEvent ? Almanac.eventUid(editingEvent) : "")
     if (!uid || !hostedCalendarId || eventSaving) return
     eventSaving = true
     eventError = ""
     eventToken += 1
+    var rev = eventRevOf(editingEvent)
+    if (Almanac.repeats(editingEvent) && !allDates) {
+      var when = Almanac.occurrenceOf(editingEvent)
+      pendingEvent = { op: "skip", token: eventToken }
+      almanacRemote.skip(hostedCalendarId, uid, when.date, when.time, eventToken, rev)
+      return
+    }
     pendingEvent = { op: "delete", token: eventToken }
-    almanacRemote.remove(hostedCalendarId, uid, eventToken, eventRevOf(editingEvent))
+    almanacRemote.remove(hostedCalendarId, uid, eventToken, rev)
   }
 
   function onAlmanacFinished(op, ok, body, token) {
