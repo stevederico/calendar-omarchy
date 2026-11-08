@@ -332,7 +332,7 @@ fn sync_one(store: &mut Store, id: &str) -> Result<usize, String> {
     if cal.url.is_empty() {
         return Ok(store.events.iter().filter(|e| e.calendar_id == id).count());
     }
-    // An Almanac calendar syncs from its JSON API through the script (which
+    // An Agent Cloud calendar syncs from its JSON API through the script (which
     // opens sealed events); any other feed is plain ICS.
     let ics_text = match almanac_ics(&cal.url) {
         Some(result) => result?,
@@ -358,7 +358,7 @@ fn almanac_script() -> Option<PathBuf> {
 }
 
 /// Asks the script for this feed URL as ICS. `None` when the URL is not one of
-/// the Almanac calendars in the credentials file (exit 3) or there is no script.
+/// the Agent Cloud calendars in the credentials file (exit 3) or there is no script.
 /// The URL goes on stdin: it carries the feed token.
 fn almanac_ics(url: &str) -> Option<Result<String, String>> {
     let script = almanac_script()?;
@@ -371,14 +371,14 @@ fn almanac_ics(url: &str) -> Option<Result<String, String>> {
         .spawn();
     let mut child = match child {
         Ok(child) => child,
-        Err(err) => return Some(Err(format!("almanac: {err}"))),
+        Err(err) => return Some(Err(format!("Agent Cloud: {err}"))),
     };
     if let Some(mut stdin) = child.stdin.take() {
         let _ = writeln!(stdin, "{url}");
     }
     let out = match child.wait_with_output() {
         Ok(out) => out,
-        Err(err) => return Some(Err(format!("almanac: {err}"))),
+        Err(err) => return Some(Err(format!("Agent Cloud: {err}"))),
     };
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     match out.status.code() {
@@ -387,7 +387,7 @@ fn almanac_ics(url: &str) -> Option<Result<String, String>> {
         _ => {
             let err = text.trim().trim_start_matches("ERROR:").trim();
             Some(Err(if err.is_empty() {
-                "almanac sync failed".into()
+                "Agent Cloud sync failed".into()
             } else {
                 err.to_string()
             }))

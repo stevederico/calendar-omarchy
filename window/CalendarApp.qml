@@ -39,7 +39,7 @@ Item {
 
   FloatingWindow {
     id: window
-    title: "Dottie Calendar"
+    title: "Agent Cloud Calendar"
     visible: false
     color: Color.background
     implicitWidth: 1400

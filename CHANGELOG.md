@@ -1,3 +1,13 @@
+0.9.0
+
+  Rename to Agent Cloud
+  Read agentcloud credentials
+  Fall back to almanac
+  Map old feed host
+  Rename IPC targets
+  Rebuild sd-calendar
+  Update Agent Cloud client
+
 0.8.0
 
   Delete one date

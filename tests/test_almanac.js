@@ -27,11 +27,12 @@ function listen(server) {
   })
 }
 
-function runScript(args, env) {
+function runScript(args, env, input) {
   return new Promise((resolve) => {
     const child = spawn("bash", [path.join(__dirname, "..", "scripts", "almanac-events.sh"), ...args], {
       env: { ...process.env, ...env }
     })
+    child.stdin.end(input || "")
     let stdout = ""
     let stderr = ""
     child.stdout.on("data", (c) => { stdout += c })
@@ -42,9 +43,28 @@ function runScript(args, env) {
 
 test("parseCalendars keeps id name subscribe, drops key", () => {
   const rows = Almanac.parseCalendars(JSON.stringify([
-    { id: "cal_1", name: "Almanac", key: "secret", subscribe: "https://feed", write: "https://w" }
+    { id: "cal_1", name: "Work", key: "secret", subscribe: "https://feed", write: "https://w" }
   ]))
-  assert.deepEqual(rows, [{ id: "cal_1", name: "Almanac", subscribe: "https://feed" }])
+  assert.deepEqual(rows, [{ id: "cal_1", name: "Work", subscribe: "https://feed" }])
+})
+
+test("old default names show as Agent Cloud", () => {
+  const rows = Almanac.parseCalendars(JSON.stringify([
+    { id: "a", name: "Almanac", key: "k" }, { id: "b", name: "Dottie", key: "k" }, { id: "c", key: "k" }
+  ]))
+  assert.deepEqual(rows.map((r) => r.name), ["Agent Cloud", "Agent Cloud", "Agent Cloud"])
+  assert.equal(Almanac.displayName(" Home "), "Home")
+})
+
+test("isAlmanacUrl knows the Agent Cloud host and the old one", () => {
+  assert.equal(Almanac.isAlmanacUrl("https://cloud.bixbyapps.com/v1/c/x/feed.ics"), true)
+  assert.equal(Almanac.isAlmanacUrl("https://almanac.dottie.ai/v1/c/x/feed.ics"), true)
+  assert.equal(Almanac.isAlmanacUrl("https://example.com/x.ics"), false)
+})
+
+test("errors say Agent Cloud", () => {
+  assert.equal(Almanac.errorMessage(""), "Agent Cloud request failed")
+  assert.equal(Almanac.errorMessage("ERROR:unauthorized"), "Agent Cloud key rejected")
 })
 
 test("eventUid reads the middle of calendarId:uid:dateKey", () => {
@@ -59,6 +79,9 @@ test("isWritable is Almanac feed or almanac id", () => {
   assert.equal(Almanac.isWritable({ calendarId: "almanac" }, []), true)
   assert.equal(Almanac.isWritable({ calendarId: "work" }, [
     { id: "work", url: "https://almanac.dottie.ai/x.ics" }
+  ]), true)
+  assert.equal(Almanac.isWritable({ calendarId: "work" }, [
+    { id: "work", url: "https://cloud.bixbyapps.com/x.ics" }
   ]), true)
   assert.equal(Almanac.isWritable({ calendarId: "local" }, [
     { id: "local", url: "" }
@@ -111,7 +134,7 @@ test("almanac-events.sh posts and deletes without leaking the key", async () => 
     })
   })
   const port = await listen(server)
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dottie-cal-"))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agentcloud-cal-"))
   const config = writeConfig(dir, port)
   const body = path.join(dir, "body.json")
   fs.writeFileSync(body, JSON.stringify({ summary: "Call", start: "2026-09-22T09:00:00-07:00" }))
@@ -128,14 +151,15 @@ test("almanac-events.sh posts and deletes without leaking the key", async () => 
   assert.equal(seen[1].method, "POST")
   assert.equal(seen[1].url, "/v1/c/cal_test/events")
   assert.equal(seen[1].auth, "Bearer " + TOKEN)
-  assert.match(seen[1].ua, /dottie-calendar/)
+  assert.match(seen[1].ua, /agentcloud-calendar/)
   assert.equal(seen[2].method, "DELETE")
   assert.match(feed.stdout, /feed\.ics/)
 })
 
 test("almanac-events.sh seals a post when the calendar feed is seal", async () => {
-  const bin = process.env.ALMANAC_BIN
-    || path.join(process.env.HOME, "Projects/almanac/target/debug/almanac")
+  const bin = process.env.AGENTCLOUD_BIN || process.env.ALMANAC_BIN
+    || ["agentcloud/target/debug/agentcloud", "almanac/target/debug/almanac"].map((rel) => path.join(process.env.HOME, "Projects", rel)).find((p) => fs.existsSync(p))
+    || path.join(process.env.HOME, "Projects/agentcloud/target/debug/agentcloud")
   if (!fs.existsSync(bin)) return
   const seen = []
   const server = http.createServer((req, res) => {
@@ -153,7 +177,7 @@ test("almanac-events.sh seals a post when the calendar feed is seal", async () =
     })
   })
   const port = await listen(server)
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dottie-cal-"))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agentcloud-cal-"))
   const config = writeConfig(dir, port)
   const body = path.join(dir, "body.json")
   fs.writeFileSync(body, JSON.stringify({ summary: "Call", start: "2026-09-22T09:00:00-07:00" }))
@@ -216,7 +240,7 @@ test("almanac-events.sh keeps a series in place and maps a deleted event to conf
     })
   })
   const port = await listen(server)
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dottie-cal-"))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agentcloud-cal-"))
   const config = writeConfig(dir, port)
   const body = path.join(dir, "body.json")
   fs.writeFileSync(body, JSON.stringify({ uid: "evt-1", summary: "New", start: "2026-09-29T09:00:00+00:00" }))
@@ -251,7 +275,7 @@ test("almanac-events.sh sends --rev as If-Match and maps 412 to conflict", async
     })
   })
   const port = await listen(server)
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dottie-cal-"))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agentcloud-cal-"))
   const config = writeConfig(dir, port)
   const body = path.join(dir, "body.json")
   fs.writeFileSync(body, JSON.stringify({ uid: "evt-1", summary: "New" }))
@@ -295,7 +319,7 @@ test("almanac-events.sh skip adds the occurrence's exdate in the series zone", a
     })
   })
   const port = await listen(server)
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dottie-cal-"))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agentcloud-cal-"))
   const env = { ALMANAC_CONFIG: writeConfig(dir, port), TZ: "America/New_York" }
   const run = (...args) => runScript(["skip", "--cal", "cal_test", ...args], env)
   // 09:00 in Los Angeles shows as 12:00 in New York.
@@ -315,4 +339,32 @@ test("almanac-events.sh skip adds the occurrence's exdate in the series zone", a
     ["PUT", "/v1/c/cal_test/events/weekly/exdates", '"9"', "2026-10-13T09:00:00"],
     ["PUT", "/v1/c/cal_test/events/allday/exdates", '"4"', "2026-10-06"]
   ])
+})
+
+test("almanac-events.sh ics matches a feed subscribed on the old host", async () => {
+  const server = http.createServer((req, res) => {
+    req.resume()
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" })
+      res.end(JSON.stringify(req.url.indexOf("/events") >= 0 ? { events: [] } : { id: "cal_test", feed: "plain" }))
+    })
+  })
+  const port = await listen(server)
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agentcloud-cal-"))
+  const config = path.join(dir, "hosted-calendars.json")
+  fs.writeFileSync(config, JSON.stringify([{
+    id: "cal_test",
+    key: "test-key",
+    write: `http://127.0.0.1:${port}/v1/c/cal_test/events`,
+    subscribe: "https://cloud.bixbyapps.com/v1/c/cal_test/feed.ics?t=f"
+  }]))
+  const env = { ALMANAC_CONFIG: config }
+  const old = await runScript(["ics"], env, "https://almanac.dottie.ai/v1/c/cal_test/feed.ics?t=f\n")
+  const other = await runScript(["ics"], env, "https://example.com/feed.ics\n")
+  server.close()
+  fs.rmSync(dir, { recursive: true, force: true })
+  assert.equal(old.status, 0, old.stdout + old.stderr)
+  assert.match(old.stdout, /^BEGIN:VCALENDAR/)
+  assert.match(old.stdout, /PRODID:-\/\/agentcloud\/\/calendar\/\/EN/)
+  assert.equal(other.status, 3)
 })

@@ -1,4 +1,6 @@
-// Almanac hosted events. No I/O. QML and Node tests share this file.
+// Agent Cloud hosted events (the almanac server). No I/O. QML and Node tests share this file.
+
+var PRODUCT = "Agent Cloud"
 
 function trim(s) {
   return String(s || "").replace(/^\s+|\s+$/g, "")
@@ -7,6 +9,13 @@ function trim(s) {
 function pad2(value) {
   var n = Number(value)
   return (n < 10 ? "0" : "") + n
+}
+
+// The old default names ("Almanac", "Dottie") show as Agent Cloud.
+function displayName(name) {
+  var text = trim(name)
+  if (!text || text === "Almanac" || text === "Dottie") return PRODUCT
+  return text
 }
 
 function parseCalendars(raw) {
@@ -22,7 +31,7 @@ function parseCalendars(raw) {
     if (!row || !row.id) continue
     out.push({
       id: String(row.id),
-      name: trim(row.name) || "Almanac",
+      name: displayName(row.name),
       subscribe: trim(row.subscribe)
     })
   }
@@ -53,8 +62,10 @@ function eventUid(event) {
   return ""
 }
 
+// Agent Cloud feeds, on the current host or the old one.
 function isAlmanacUrl(url) {
-  return String(url || "").indexOf("almanac.dottie.ai") >= 0
+  var text = String(url || "")
+  return text.indexOf("cloud.bixbyapps.com") >= 0 || text.indexOf("almanac.dottie.ai") >= 0
 }
 
 function isWritable(event, calendars) {
@@ -181,15 +192,18 @@ function errorMessage(raw) {
     if (parsed && parsed.error) text = String(parsed.error)
   } catch (e) {}
   text = trim(text)
-  if (!text) return "Almanac request failed"
-  if (text === "unauthorized") return "Almanac key rejected"
-  if (text === "rate limit exceeded") return "Almanac write budget"
-  if (text === "calendar is full") return "Almanac event cap"
+  if (!text) return PRODUCT + " request failed"
+  if (text === "unauthorized") return PRODUCT + " key rejected"
+  if (text === "rate limit exceeded") return PRODUCT + " write budget"
+  if (text === "calendar is full") return PRODUCT + " event cap"
   return text
 }
 
 if (typeof module !== "undefined") {
   module.exports = {
+    PRODUCT: PRODUCT,
+    displayName: displayName,
+    isAlmanacUrl: isAlmanacUrl,
     parseCalendars: parseCalendars,
     resolveCalendar: resolveCalendar,
     eventUid: eventUid,

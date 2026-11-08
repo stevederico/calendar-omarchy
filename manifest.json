@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "sd.calendar",
-  "name": "Dottie Calendar",
-  "version": "0.8.0",
+  "name": "Agent Cloud Calendar",
+  "version": "0.9.0",
   "author": "sd",
   "license": "MIT",
-  "description": "Dottie Calendar. Day, week, month, year. Almanac events plus ICS feeds. Search dottie or calendar.",
+  "description": "Agent Cloud Calendar. Day, week, month, year. Agent Cloud events plus ICS feeds. Search agentcloud or calendar.",
   "kinds": [
     "bar-widget",
     "panel"
@@ -16,14 +16,13 @@
     "panel": "window/CalendarApp.qml"
   },
   "barWidget": {
-    "displayName": "Dottie Calendar",
-    "description": "Open Dottie Calendar from the bar",
+    "displayName": "Agent Cloud Calendar",
+    "description": "Open Agent Cloud Calendar from the bar",
     "category": "Time",
     "aliases": [
-      "dottie",
-      "dot",
+      "agentcloud",
+      "agent cloud",
       "calendar",
-      "almanac",
       "agenda"
     ],
     "allowMultiple": false,

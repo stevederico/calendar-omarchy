@@ -1,7 +1,7 @@
 import QtQuick
 import qs.Commons
 
-// In-window card to add or edit one Almanac event.
+// In-window card to add or edit one Agent Cloud event.
 Item {
   id: root
   property var host: null

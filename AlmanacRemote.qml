@@ -2,7 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Sequential Almanac HTTP via scripts/almanac-events.sh. Key never leaves that script.
+// Sequential Agent Cloud HTTP via scripts/almanac-events.sh. Key never leaves that script.
 Item {
   id: root
 
@@ -84,7 +84,7 @@ Item {
       proc.lastBody = ""
       var ok = code === 0 && body.indexOf("ERROR:") !== 0
       if (!ok && body.indexOf("ERROR:") !== 0)
-        body = body.length ? body : "ERROR:Almanac request failed"
+        body = body.length ? body : "ERROR:Agent Cloud request failed"
       root.done(ok, body)
     }
   }

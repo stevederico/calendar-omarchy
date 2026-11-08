@@ -94,9 +94,14 @@ Item {
   property bool eventSaving: false
   property int eventToken: 0
   property var pendingEvent: null
-  readonly property string calendarsPath: (Quickshell.env("XDG_CONFIG_HOME") || ((Quickshell.env("HOME") || "") + "/.config")) + "/almanac/hosted-calendars.json"
+  readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || ((Quickshell.env("HOME") || "") + "/.config")
+  readonly property string calendarsPath: configHome + "/agentcloud/hosted-calendars.json"
+  // Installs from before the Agent Cloud rename keep their key here. Read only when calendarsPath is missing.
+  readonly property string legacyCalendarsPath: configHome + "/almanac/hosted-calendars.json"
+  property bool calendarsPrimary: false
+  property var legacyHostedCalendars: []
   // Plaintext request bodies: the private runtime dir, else a private cache dir. Removed after each write.
-  readonly property string almanacBodyDir: Quickshell.env("XDG_RUNTIME_DIR") || ((Quickshell.env("XDG_CACHE_HOME") || ((Quickshell.env("HOME") || "") + "/.cache")) + "/dottie-calendar")
+  readonly property string almanacBodyDir: Quickshell.env("XDG_RUNTIME_DIR") || ((Quickshell.env("XDG_CACHE_HOME") || ((Quickshell.env("HOME") || "") + "/.cache")) + "/agentcloud-calendar")
   property string syncNotice: ""
   // Request body per write token, removed when that write finishes (even if the editor closed).
   property var bodyPaths: ({})
@@ -150,6 +155,10 @@ Item {
   function applyEvents(text) {
     var parsed = Model.parseEventsFile(text)
     eventsByDate = parsed.eventsByDate
+    for (var c = 0; c < parsed.calendars.length; c++) {
+      var cal = parsed.calendars[c]
+      if (cal && cal.name === "Almanac") cal.name = Almanac.PRODUCT
+    }
     calendars = parsed.calendars
     if (detailCalendar && detailCalendar.id) {
       var id = detailCalendar.id
@@ -239,7 +248,7 @@ Item {
   function saveEvent(draft) {
     if (eventSaving) return
     if (!hostedCalendarId) {
-      eventError = "No Almanac calendar"
+      eventError = "No Agent Cloud calendar"
       return
     }
     var built = Almanac.buildEventBody(draft)
@@ -263,7 +272,7 @@ Item {
     eventSaving = true
     eventError = ""
     eventToken += 1
-    var path = almanacBodyDir + "/dottie-calendar-almanac-body-" + eventToken + ".json"
+    var path = almanacBodyDir + "/agentcloud-calendar-body-" + eventToken + ".json"
     pendingEvent = { op: "post", token: eventToken, path: path, rev: rev, copy: copy }
     var paths = Object.assign({}, bodyPaths)
     paths[eventToken] = path
@@ -386,7 +395,7 @@ Item {
       root.statusText = "Paste an ICS URL"
       return
     }
-    if (!name) name = url.indexOf("almanac") !== -1 ? "Almanac" : "Calendar"
+    if (!name) name = Almanac.isAlmanacUrl(url) ? Almanac.PRODUCT : "Calendar"
     root.runCal(["subscribe", name, url])
   }
 
@@ -444,14 +453,37 @@ Item {
     onLoadFailed: root.applyEvents("")
   }
 
+  // Same choice as almanac-lib.sh: the Agent Cloud file when it exists, else the old almanac one.
   FileView {
     id: hostedFile
     path: root.calendarsPath
     watchChanges: true
     printErrors: false
     onFileChanged: reload()
-    onLoaded: root.hostedCalendars = Almanac.parseCalendars(text())
-    onLoadFailed: root.hostedCalendars = []
+    onLoaded: {
+      root.calendarsPrimary = true
+      root.hostedCalendars = Almanac.parseCalendars(text())
+    }
+    onLoadFailed: {
+      root.calendarsPrimary = false
+      root.hostedCalendars = root.legacyHostedCalendars
+    }
+  }
+
+  FileView {
+    id: legacyHostedFile
+    path: root.legacyCalendarsPath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      root.legacyHostedCalendars = Almanac.parseCalendars(text())
+      if (!root.calendarsPrimary) root.hostedCalendars = root.legacyHostedCalendars
+    }
+    onLoadFailed: {
+      root.legacyHostedCalendars = []
+      if (!root.calendarsPrimary) root.hostedCalendars = []
+    }
   }
 
   FileView {
@@ -469,7 +501,7 @@ Item {
       if (root.pendingEvent) root.removeBodyFile(root.pendingEvent.path || "")
       root.pendingEvent = null
       root.eventSaving = false
-      root.eventError = "Could not write Almanac request"
+      root.eventError = "Could not write Agent Cloud request"
     }
   }
 
@@ -515,7 +547,11 @@ Item {
     running: root.live
     repeat: true
     triggeredOnStart: true
-    onTriggered: if (!root.busy && root.calQueue.length === 0) root.runCal(["sync"])
+    onTriggered: {
+      // Picks up a credentials file written at the Agent Cloud path after the window opened.
+      if (!root.calendarsPrimary) hostedFile.reload()
+      if (!root.busy && root.calQueue.length === 0) root.runCal(["sync"])
+    }
   }
 
   Process {
