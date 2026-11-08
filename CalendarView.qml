@@ -247,16 +247,29 @@ Item {
       eventError = built.error
       return
     }
+    var body = built.body
+    var copy = null
+    if (body.uid) {
+      // Saved as a new event if the server refuses this edit.
+      copy = Almanac.conflictCopy(body)
+      // Only the title changed: leave the times alone, so a repeating series stays put.
+      if (editingEvent && Almanac.sameWhen(editingEvent, draft)) body = { uid: body.uid, summary: body.summary }
+    }
+    writeEvent(body, body.uid ? eventRevOf(editingEvent) : "", copy)
+  }
+
+  // copy: the body to save as a new event on a conflict, or null.
+  function writeEvent(body, rev, copy) {
     eventSaving = true
     eventError = ""
     eventToken += 1
     var path = almanacBodyDir + "/dottie-calendar-almanac-body-" + eventToken + ".json"
-    pendingEvent = { op: "post", token: eventToken, path: path, rev: built.body.uid ? eventRevOf(editingEvent) : "" }
+    pendingEvent = { op: "post", token: eventToken, path: path, rev: rev, copy: copy }
     var paths = Object.assign({}, bodyPaths)
     paths[eventToken] = path
     bodyPaths = paths
     almanacBodyFile.path = path
-    var text = JSON.stringify(built.body) + "\n"
+    var text = JSON.stringify(body) + "\n"
     var token = eventToken
     Qt.callLater(function () {
       if (root.pendingEvent && root.pendingEvent.token === token) almanacBodyFile.setText(text)
@@ -268,9 +281,19 @@ Item {
     return event && event.rev ? String(event.rev) : ""
   }
 
+  // Removes request bodies after each write. Paths queue while one rm runs.
+  property var rmPaths: []
+
   function removeBodyFile(path) {
     if (!path) return
-    rmProc.command = ["rm", "-f", path]
+    rmPaths = rmPaths.concat([path])
+    if (!rmProc.running) runRemove()
+  }
+
+  function runRemove() {
+    if (!rmPaths.length) return
+    rmProc.command = ["rm", "-f"].concat(rmPaths)
+    rmPaths = []
     rmProc.running = true
   }
 
@@ -292,8 +315,15 @@ Item {
       bodyPaths = paths
     }
     if (!pendingEvent || token !== pendingEvent.token) return
+    var job = pendingEvent
     pendingEvent = null
     eventSaving = false
+    if (!ok && Almanac.isConflict(body) && job.copy) {
+      // Changed or deleted elsewhere: keep the server's event and save ours as a new one.
+      syncNotice = "Event changed elsewhere, saved a copy"
+      writeEvent(job.copy, "", null)
+      return
+    }
     if (!ok && Almanac.isConflict(body)) {
       // Changed elsewhere since the last sync: reload and say so.
       closeEventEditor()
@@ -481,6 +511,7 @@ Item {
 
   Process {
     id: rmProc
+    onExited: root.runRemove()
   }
 
   Process {

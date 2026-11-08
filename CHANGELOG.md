@@ -1,3 +1,10 @@
+0.7.0
+
+  Keep conflict copies
+  Hold series dates
+  Queue body cleanup
+  Update Almanac client
+
 0.6.0
 
   Sync Almanac from JSON

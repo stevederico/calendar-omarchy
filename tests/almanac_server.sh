@@ -92,11 +92,16 @@ for feed in plain seal; do
   check "$feed: post with a new uid creates" "$(field 'd["uid"]')" "standup"
   srev=$(field 'd["rev"]')
 
-  # The editor sends summary/start/end only; the update keeps the rest.
-  printf '{"uid":"standup","summary":"Standup v2","start":"%sT10:00:00","end":"%sT10:15:00"}' "$series_start" "$series_start" >"$work/body.json"
+  # The editor shows one date of a series: its times would move the whole series.
+  printf '{"uid":"standup","summary":"Standup v2","start":"%sT10:00:00","end":"%sT10:15:00"}' "$skip" "$skip" >"$work/body.json"
+  run post --cal "$cal" --rev "$srev" --body-file "$work/body.json"
+  check "$feed: series times are refused" "$(cat "$work/out")" "ERROR:repeating event: only the title can change here"
+
+  # A title-only edit sends summary alone; the update keeps the rest.
+  printf '{"uid":"standup","summary":"Standup v2"}' >"$work/body.json"
   run post --cal "$cal" --rev "$srev" --body-file "$work/body.json"
   check "$feed: update with rev" "$?" "0"
-  check "$feed: update keeps fields" "$(field '(d["summary"], d.get("rrule"), d.get("location"), d.get("timeZone"))')" "('Standup v2', 'FREQ=DAILY', 'Room 4', 'America/Los_Angeles')"
+  check "$feed: update keeps fields" "$(field '(d["summary"], d.get("rrule"), d.get("location"), d.get("timeZone"), d["start"][:10])')" "('Standup v2', 'FREQ=DAILY', 'Room 4', 'America/Los_Angeles', '$series_start')"
   srev2=$(field 'd["rev"]')
   run post --cal "$cal" --rev "$srev" --body-file "$work/body.json"
   check "$feed: stale rev update is a conflict" "$(cat "$work/out")" "ERROR:conflict"
@@ -117,8 +122,11 @@ for feed in plain seal; do
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["uid"]=sys.argv[2]; json.dump(d, open(sys.argv[1],"w"))' "$work/body.json" "$uid"
   run post --cal "$cal" --rev "$rev" --body-file "$work/body.json"
   check "$feed: move with rev" "$(field 'd["start"][:10]')" "$d2"
-  run delete --cal "$cal" --uid "$uid" --rev "$(field 'd["rev"]')"
+  drev=$(field 'd["rev"]')
+  run delete --cal "$cal" --uid "$uid" --rev "$drev"
   check "$feed: delete with rev" "$(cat "$work/out")" '{"ok":true}'
+  run post --cal "$cal" --rev "$drev" --body-file "$work/body.json"
+  check "$feed: update of a deleted event is a conflict" "$(cat "$work/out")" "ERROR:conflict"
 done
 
 printf 'https://example.com/other.ics\n' >"$work/url"

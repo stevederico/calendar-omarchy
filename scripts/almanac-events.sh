@@ -10,8 +10,11 @@
 #                                      calendar's events as ICS (exit 3: not Almanac)
 #
 # An update keeps the fields the editor does not own (location, description,
-# repeat rule, time zone, skipped and moved dates). Prints JSON on success,
-# `ERROR:<text>` otherwise. A stale --rev prints `ERROR:conflict`.
+# repeat rule, time zone, skipped and moved dates). An update of a repeating
+# event may change its title only: the editor shows one date, and its times
+# would move the whole series. Prints JSON on success, `ERROR:<text>`
+# otherwise. A stale --rev, or one for an event deleted since, prints
+# `ERROR:conflict`.
 set -u
 
 fail() {
@@ -237,18 +240,19 @@ except Exception:
 sys.stdout.write(str(d.get("uid") or "").strip() if isinstance(d, dict) else "")' "$1"
 }
 
-# The editor owns summary, start, end, allDay. Everything else comes from the
-# current event, so a PUT (which needs the full body) loses nothing.
+# The editor owns summary, start, end, allDay (only summary when the edit has
+# no start: a title-only edit). Everything else comes from the current event,
+# so a PUT (which needs the full body) loses nothing.
 merge_event() {
   python3 -c 'import json, sys
 current = json.load(open(sys.argv[1]))
 edit = json.load(open(sys.argv[2]))
 if not isinstance(current, dict) or not isinstance(edit, dict):
     sys.exit(1)
+owned = ("summary", "start", "end", "allDay") if "start" in edit else ("summary",)
 out = {k: v for k, v in current.items()
-       if k not in ("uid", "seal", "rev", "sequence", "createdAt", "updatedAt", "sealed", "unreadable",
-                    "summary", "start", "end", "allDay")}
-for k in ("summary", "start", "end", "allDay"):
+       if k not in ("uid", "seal", "rev", "sequence", "createdAt", "updatedAt", "sealed", "unreadable") + owned}
+for k in owned:
     if k in edit:
         out[k] = edit[k]
 json.dump(out, open(sys.argv[3], "w"))' "$1" "$2" "$3"
@@ -277,6 +281,7 @@ case "$CMD" in
     if [[ -n $ITEM ]]; then
       # Update: read, merge, PUT with If-Match. Cloudflare blocks PATCH.
       request GET "$EVENTS/$ITEM"
+      [[ $CODE == 404 && -n $REV ]] && fail "conflict"
       [[ $CODE == 200 || ( $CODE == 404 && -z $REV ) ]] || finish
       [[ $CODE == 404 ]] && ITEM=""   # a new event with a chosen uid
     fi
@@ -299,6 +304,11 @@ case "$CMD" in
 d = json.load(open(sys.argv[1]))
 print("1" if d.get("unreadable") else "0", d.get("rev") or "")' "$CURRENT")
     [[ $UNREADABLE == 0 ]] || fail "could not open the seal"
+    REPEATS=$(python3 -c 'import json, sys
+current = json.load(open(sys.argv[1]))
+edit = json.load(open(sys.argv[2]))
+print("1" if current.get("rrule") and any(k in edit for k in ("start", "end", "allDay")) else "0")' "$CURRENT" "$BODYFILE") || fail "bad event"
+    [[ $REPEATS == 0 ]] || fail "repeating event: only the title can change here"
     MERGED=$(almanac_tmp) || fail "Almanac request failed"
     merge_event "$CURRENT" "$BODYFILE" "$MERGED" || fail "bad event"
     if [[ $FEED == seal ]]; then

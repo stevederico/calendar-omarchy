@@ -178,6 +178,58 @@ test("errorMessage maps the conflict line", () => {
   assert.equal(Almanac.errorMessage("ERROR:conflict\n"), "Changed elsewhere")
 })
 
+test("sameWhen is true only when the date and times stay", () => {
+  const timed = { dateKey: "2026-09-22", start: "09:00", end: "", allDay: false }
+  const draft = { title: "x", dateKey: "2026-09-22", start: "09:00", end: "10:00", allDay: false }
+  assert.equal(Almanac.sameWhen(timed, draft), true)
+  assert.equal(Almanac.sameWhen(timed, { ...draft, dateKey: "2026-09-23" }), false)
+  assert.equal(Almanac.sameWhen(timed, { ...draft, start: "09:30" }), false)
+  assert.equal(Almanac.sameWhen(timed, { ...draft, allDay: true }), false)
+  const allDay = { dateKey: "2026-09-22", start: "", end: "", allDay: true }
+  assert.equal(Almanac.sameWhen(allDay, { ...draft, allDay: true, start: "11:00" }), true)
+})
+
+test("conflictCopy drops the uid and marks the title", () => {
+  const copy = Almanac.conflictCopy({ uid: "evt-1", summary: " Dentist ", start: "2026-09-22T09:00:00-07:00", end: "2026-09-22T10:00:00-07:00" })
+  assert.deepEqual(copy, { summary: "Dentist (conflict copy)", start: "2026-09-22T09:00:00-07:00", end: "2026-09-22T10:00:00-07:00" })
+  assert.equal(Almanac.conflictCopy({ uid: "e", summary: "x".repeat(512), start: "2026-09-22" }).summary.length, 512)
+})
+
+test("almanac-events.sh keeps a series in place and maps a deleted event to conflict", async () => {
+  const seen = []
+  const server = http.createServer((req, res) => {
+    req.resume()
+    req.on("end", () => {
+      seen.push({ method: req.method, url: req.url })
+      if (req.method === "GET" && req.url === "/v1/c/cal_test") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify({ id: "cal_test", feed: "plain" }))
+        return
+      }
+      if (req.method === "GET" && req.url.endsWith("/gone")) {
+        res.writeHead(404, { "content-type": "application/json" })
+        res.end(JSON.stringify({ error: "not found" }))
+        return
+      }
+      res.writeHead(200, { "content-type": "application/json" })
+      res.end(JSON.stringify({ uid: "evt-1", summary: "Old", start: "2026-09-22T09:00:00", timeZone: "UTC", rrule: "FREQ=WEEKLY", rev: 9 }))
+    })
+  })
+  const port = await listen(server)
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dottie-cal-"))
+  const config = writeConfig(dir, port)
+  const body = path.join(dir, "body.json")
+  fs.writeFileSync(body, JSON.stringify({ uid: "evt-1", summary: "New", start: "2026-09-29T09:00:00+00:00" }))
+  const moved = await runScript(["post", "--cal", "cal_test", "--rev", "9", "--body-file", body], { ALMANAC_CONFIG: config })
+  fs.writeFileSync(body, JSON.stringify({ uid: "gone", summary: "New" }))
+  const gone = await runScript(["post", "--cal", "cal_test", "--rev", "9", "--body-file", body], { ALMANAC_CONFIG: config })
+  server.close()
+  fs.rmSync(dir, { recursive: true, force: true })
+  assert.equal(moved.stdout, "ERROR:repeating event: only the title can change here\n")
+  assert.equal(gone.stdout, "ERROR:conflict\n")
+  assert.deepEqual(seen.filter((row) => row.method !== "GET"), [])
+})
+
 test("almanac-events.sh sends --rev as If-Match and maps 412 to conflict", async () => {
   const seen = []
   const server = http.createServer((req, res) => {
@@ -202,7 +254,7 @@ test("almanac-events.sh sends --rev as If-Match and maps 412 to conflict", async
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dottie-cal-"))
   const config = writeConfig(dir, port)
   const body = path.join(dir, "body.json")
-  fs.writeFileSync(body, JSON.stringify({ uid: "evt-1", summary: "New", start: "2026-09-22T10:00:00-07:00" }))
+  fs.writeFileSync(body, JSON.stringify({ uid: "evt-1", summary: "New" }))
   const posted = await runScript(["post", "--cal", "cal_test", "--rev", "7", "--body-file", body], { ALMANAC_CONFIG: config })
   const removed = await runScript(["delete", "--cal", "cal_test", "--uid", "evt-1", "--rev", "7"], { ALMANAC_CONFIG: config })
   server.close()

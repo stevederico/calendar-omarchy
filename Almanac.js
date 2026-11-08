@@ -127,6 +127,34 @@ function buildEventBody(draft) {
   return { body: body }
 }
 
+// The date and times the editor shows for an event (as EventEditor.fill() does).
+function editorWhen(event) {
+  var allDay = !!(event && (event.allDay || !event.start))
+  return {
+    dateKey: trim(event && event.dateKey),
+    start: allDay ? "09:00" : trim(event.start),
+    end: allDay || !event.end ? "10:00" : trim(event.end),
+    allDay: allDay
+  }
+}
+
+// True when a draft keeps the event's date and times: only the title changed.
+function sameWhen(event, draft) {
+  var was = editorWhen(event)
+  var allDay = !!(draft && draft.allDay)
+  if (was.allDay !== allDay || was.dateKey !== trim(draft && draft.dateKey)) return false
+  return allDay || (trim(draft.start) === was.start && trim(draft.end) === was.end)
+}
+
+// The body that saves an edit the server refused as a new event.
+function conflictCopy(body) {
+  var suffix = " (conflict copy)"
+  var copy = {}
+  for (var key in body) if (key !== "uid") copy[key] = body[key]
+  copy.summary = trim(body && body.summary).slice(0, 512 - suffix.length) + suffix
+  return copy
+}
+
 // The script prints ERROR:conflict when a --rev is stale (HTTP 412).
 function isConflict(raw) {
   return trim(String(raw || "")) === "ERROR:conflict"
@@ -157,6 +185,9 @@ if (typeof module !== "undefined") {
     buildEventBody: buildEventBody,
     isoWhen: isoWhen,
     isConflict: isConflict,
+    editorWhen: editorWhen,
+    sameWhen: sameWhen,
+    conflictCopy: conflictCopy,
     errorMessage: errorMessage
   }
 }
