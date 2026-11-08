@@ -20,6 +20,8 @@ pub struct Event {
     pub end: String,
     pub color: String,
     pub all_day: bool,
+    /// Almanac rev of the event this row came from; empty for other feeds.
+    pub rev: String,
 }
 
 #[derive(Clone)]
@@ -70,12 +72,31 @@ pub fn load(path: &PathBuf) -> Result<Store, String> {
     parse_store(&text)
 }
 
+/// Writes the store owner-only (0600): it can hold opened sealed events.
+/// Missing parent directories are made 0700.
 pub fn save(path: &PathBuf, store: &Store) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
     if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .map_err(|e| e.to_string())?;
     }
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, encode(store).as_bytes()).map_err(|e| e.to_string())?;
+    let _ = fs::remove_file(&tmp);
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)
+        .map_err(|e| e.to_string())?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|e| e.to_string())?;
+    file.write_all(encode(store).as_bytes())
+        .map_err(|e| e.to_string())?;
+    drop(file);
     fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
@@ -118,6 +139,11 @@ pub fn encode(store: &Store) -> String {
         out.push_str(&escape(&event.color));
         out.push_str("\",\"allDay\":");
         out.push_str(if event.all_day { "true" } else { "false" });
+        if !event.rev.is_empty() {
+            out.push_str(",\"rev\":\"");
+            out.push_str(&escape(&event.rev));
+            out.push('"');
+        }
         out.push('}');
     }
     if !store.events.is_empty() {
@@ -366,6 +392,7 @@ impl<'a> Parser<'a> {
                 end: String::new(),
                 color: String::new(),
                 all_day: false,
+                rev: String::new(),
             };
             for (k, v) in fields {
                 match (k.as_str(), v) {
@@ -377,6 +404,7 @@ impl<'a> Parser<'a> {
                     ("end", Value::Str(s)) => event.end = s,
                     ("color", Value::Str(s)) => event.color = s,
                     ("allDay", Value::Bool(b)) => event.all_day = b,
+                    ("rev", Value::Str(s)) => event.rev = s,
                     _ => {}
                 }
             }

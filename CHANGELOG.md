@@ -1,3 +1,13 @@
+0.6.0
+
+  Sync Almanac from JSON
+  Use shared Almanac client
+  Send auth token on stdin
+  Guard edits with rev
+  Keep fields on edit
+  Sync every minute
+  Private event store
+
 0.5.0
 
   Prefer sealing binary

@@ -6,6 +6,8 @@ const os = require("node:os")
 const path = require("node:path")
 const { spawn } = require("node:child_process")
 const Almanac = require("../Almanac.js")
+const crypto = require("node:crypto")
+const TOKEN = crypto.createHash("sha256").update("test-key" + "almanac-auth-v1").digest("hex")
 
 function writeConfig(dir, port) {
   const config = path.join(dir, "hosted-calendars.json")
@@ -125,7 +127,7 @@ test("almanac-events.sh posts and deletes without leaking the key", async () => 
   assert.equal(seen[0].method, "GET")
   assert.equal(seen[1].method, "POST")
   assert.equal(seen[1].url, "/v1/c/cal_test/events")
-  assert.equal(seen[1].auth, "Bearer test-key")
+  assert.equal(seen[1].auth, "Bearer " + TOKEN)
   assert.match(seen[1].ua, /dottie-calendar/)
   assert.equal(seen[2].method, "DELETE")
   assert.match(feed.stdout, /feed\.ics/)
@@ -168,4 +170,48 @@ test("almanac-events.sh seals a post when the calendar feed is seal", async () =
   assert.match(sent.seal, /^alm1\./)
   assert.equal(seen[1].body.includes("Call"), false)
   assert.equal(created.stdout.includes("test-key"), false)
+})
+
+test("errorMessage maps the conflict line", () => {
+  assert.equal(Almanac.isConflict("ERROR:conflict\n"), true)
+  assert.equal(Almanac.isConflict("ERROR:not found"), false)
+  assert.equal(Almanac.errorMessage("ERROR:conflict\n"), "Changed elsewhere")
+})
+
+test("almanac-events.sh sends --rev as If-Match and maps 412 to conflict", async () => {
+  const seen = []
+  const server = http.createServer((req, res) => {
+    req.resume()
+    req.on("end", () => {
+      seen.push({ method: req.method, url: req.url, ifMatch: req.headers["if-match"] })
+      if (req.method === "GET" && req.url === "/v1/c/cal_test") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify({ id: "cal_test", feed: "plain" }))
+        return
+      }
+      if (req.method === "GET") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify({ uid: "evt-1", summary: "Old", start: "2026-09-22T09:00:00", rrule: "FREQ=WEEKLY", rev: 9 }))
+        return
+      }
+      res.writeHead(412, { "content-type": "application/json" })
+      res.end(JSON.stringify({ error: "changed elsewhere", deleted: false, current: null }))
+    })
+  })
+  const port = await listen(server)
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dottie-cal-"))
+  const config = writeConfig(dir, port)
+  const body = path.join(dir, "body.json")
+  fs.writeFileSync(body, JSON.stringify({ uid: "evt-1", summary: "New", start: "2026-09-22T10:00:00-07:00" }))
+  const posted = await runScript(["post", "--cal", "cal_test", "--rev", "7", "--body-file", body], { ALMANAC_CONFIG: config })
+  const removed = await runScript(["delete", "--cal", "cal_test", "--uid", "evt-1", "--rev", "7"], { ALMANAC_CONFIG: config })
+  server.close()
+  fs.rmSync(dir, { recursive: true, force: true })
+  assert.equal(posted.stdout, "ERROR:conflict\n")
+  assert.equal(removed.stdout, "ERROR:conflict\n")
+  const writes = seen.filter((row) => row.method !== "GET")
+  assert.deepEqual(writes.map((row) => [row.method, row.url, row.ifMatch]), [
+    ["PUT", "/v1/c/cal_test/events/evt-1", '"7"'],
+    ["DELETE", "/v1/c/cal_test/events/evt-1", '"7"']
+  ])
 })

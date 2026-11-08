@@ -12,6 +12,7 @@ struct RawEvent {
     rrule: Option<RRule>,
     exdates: Vec<i32>,
     seal: String,
+    rev: String,
 }
 
 #[derive(Clone, Copy)]
@@ -78,27 +79,11 @@ pub fn events_from_ics(
                 },
                 color: color.into(),
                 all_day: raw.all_day,
+                rev: raw.rev.clone(),
             });
         }
     }
     out
-}
-
-pub struct SealedItem {
-    pub uid: String,
-    pub seal: String,
-}
-
-/// Shells that carry `X-ALMANAC-SEAL`. The plaintext is not in the feed.
-pub fn sealed_items(ics: &str) -> Vec<SealedItem> {
-    parse_vevents(ics)
-        .into_iter()
-        .filter(|event| !event.seal.is_empty() && !event.uid.is_empty())
-        .map(|event| SealedItem {
-            uid: event.uid,
-            seal: event.seal,
-        })
-        .collect()
 }
 
 fn parse_vevents(ics: &str) -> Vec<RawEvent> {
@@ -119,6 +104,7 @@ fn parse_vevents(ics: &str) -> Vec<RawEvent> {
                 rrule: None,
                 exdates: Vec::new(),
                 seal: String::new(),
+                rev: String::new(),
             });
             continue;
         }
@@ -136,6 +122,7 @@ fn parse_vevents(ics: &str) -> Vec<RawEvent> {
         match name.as_str() {
             "UID" => event.uid = value,
             "X-ALMANAC-SEAL" => event.seal = value,
+            "X-ALMANAC-REV" => event.rev = value,
             "SUMMARY" => event.title = unescape_ics(&value),
             "STATUS" if value.eq_ignore_ascii_case("CANCELLED") => event.uid.clear(),
             "DTSTART" => apply_dt(event, &params, &value, true),

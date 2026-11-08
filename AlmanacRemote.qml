@@ -25,12 +25,18 @@ Item {
     kick()
   }
 
-  function post(calId, bodyPath, jobToken) {
-    enqueue("post", ["post", "--cal", String(calId || ""), "--body-file", String(bodyPath || "")], jobToken)
+  // rev: the event's server rev, sent as If-Match. A stale one prints ERROR:conflict.
+  function withRev(args, rev) {
+    if (rev) args.push("--rev", String(rev))
+    return args
   }
 
-  function remove(calId, uid, jobToken) {
-    enqueue("delete", ["delete", "--cal", String(calId || ""), "--uid", String(uid || "")], jobToken)
+  function post(calId, bodyPath, jobToken, rev) {
+    enqueue("post", withRev(["post", "--cal", String(calId || ""), "--body-file", String(bodyPath || "")], rev), jobToken)
+  }
+
+  function remove(calId, uid, jobToken, rev) {
+    enqueue("delete", withRev(["delete", "--cal", String(calId || ""), "--uid", String(uid || "")], rev), jobToken)
   }
 
   function kick() {

@@ -6,7 +6,7 @@ mod store;
 use std::env;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use store::{Calendar, Event, LOCAL_COLOR, LOCAL_ID, Store};
@@ -137,6 +137,7 @@ fn cmd_add(args: Vec<String>) -> Result<(), String> {
         title,
         start,
         end: String::new(),
+        rev: String::new(),
         color: store
             .calendars
             .iter()
@@ -330,160 +331,73 @@ fn sync_one(store: &mut Store, id: &str) -> Result<usize, String> {
     if cal.url.is_empty() {
         return Ok(store.events.iter().filter(|e| e.calendar_id == id).count());
     }
-    let ics_text = fetch_ics(&cal.url)?;
+    // An Almanac calendar syncs from its JSON API through the script (which
+    // opens sealed events); any other feed is plain ICS.
+    let ics_text = match almanac_ics(&cal.url) {
+        Some(result) => result?,
+        None => fetch_ics(&cal.url)?,
+    };
     let (start, end) = ics::window();
-    let mut events = ics::events_from_ics(&ics_text, &cal.id, &cal.color, start, end);
-    if let Some(almanac_id) = almanac_id_for_url(&cal.url) {
-        for item in ics::sealed_items(&ics_text) {
-            let Ok(plain) = open_seal(&almanac_id, &item.uid, &item.seal) else {
-                continue;
-            };
-            let wrapped = ics_from_opened(&item.uid, &plain);
-            events.extend(ics::events_from_ics(&wrapped, &cal.id, &cal.color, start, end));
-        }
-    }
+    let events = ics::events_from_ics(&ics_text, &cal.id, &cal.color, start, end);
     let count = events.len();
     store.events.retain(|e| e.calendar_id != id);
     store.events.extend(events);
     Ok(count)
 }
 
-fn almanac_id_for_url(url: &str) -> Option<String> {
-    let path = env::var("ALMANAC_CONFIG").ok().map(PathBuf::from).or_else(|| {
-        let home = env::var("HOME").ok()?;
-        let base = env::var("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(home).join(".config"));
-        Some(base.join("almanac").join("hosted-calendars.json"))
-    })?;
-    let text = std::fs::read_to_string(path).ok()?;
-    let want = url.trim().trim_end_matches('/');
-    for row in text.split('{').skip(1) {
-        let Some(id) = json_string(row, "id") else {
-            continue;
-        };
-        let subscribe = json_string(row, "subscribe").unwrap_or_default();
-        if subscribe.trim().trim_end_matches('/') == want {
-            return Some(id);
-        }
+/// `scripts/almanac-events.sh` next to `bin/`, or `SD_CALENDAR_ALMANAC_SCRIPT`.
+fn almanac_script() -> Option<PathBuf> {
+    if let Some(path) = env::var_os("SD_CALENDAR_ALMANAC_SCRIPT") {
+        let path = PathBuf::from(path);
+        return path.is_file().then_some(path);
     }
-    None
+    let exe = env::current_exe().ok()?;
+    let path = exe.parent()?.parent()?.join("scripts/almanac-events.sh");
+    path.is_file().then_some(path)
 }
 
-fn binary_seals(path: &std::path::Path) -> bool {
-    let Ok(bytes) = std::fs::read(path) else {
-        return false;
+/// Asks the script for this feed URL as ICS. `None` when the URL is not one of
+/// the Almanac calendars in the credentials file (exit 3) or there is no script.
+/// The URL goes on stdin: it carries the feed token.
+fn almanac_ics(url: &str) -> Option<Result<String, String>> {
+    let script = almanac_script()?;
+    let child = Command::new("bash")
+        .arg(&script)
+        .arg("ics")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn();
+    let mut child = match child {
+        Ok(child) => child,
+        Err(err) => return Some(Err(format!("almanac: {err}"))),
     };
-    let needle = b"almanac-seal-v1";
-    bytes.windows(needle.len()).any(|window| window == needle)
-}
-
-fn open_seal(calendar_id: &str, uid: &str, seal: &str) -> Result<String, String> {
-    let bin = env::var("ALMANAC_BIN")
-        .ok()
-        .filter(|s| !s.is_empty() && binary_seals(std::path::Path::new(s)))
-        .unwrap_or_else(|| {
-            if let Some(home) = env::var("HOME").ok() {
-                for name in ["release", "debug"] {
-                    let built = PathBuf::from(&home)
-                        .join("Projects/almanac/target")
-                        .join(name)
-                        .join("almanac");
-                    if binary_seals(&built) {
-                        return built.to_string_lossy().into_owned();
-                    }
-                }
-            }
-            "almanac".into()
-        });
-    let mut child = Command::new(&bin);
-    child.args(["open", "--cal", calendar_id, "--kind", "event", "--uid", uid]);
-    if let Ok(config) = env::var("ALMANAC_CONFIG") {
-        child.env("ALMANAC_CREDS", config);
-    }
-    let mut child = child
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| e.to_string())?;
     if let Some(mut stdin) = child.stdin.take() {
-        use std::io::Write;
-        let _ = stdin.write_all(seal.as_bytes());
+        let _ = writeln!(stdin, "{url}");
     }
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err("seal was rejected".into());
+    let out = match child.wait_with_output() {
+        Ok(out) => out,
+        Err(err) => return Some(Err(format!("almanac: {err}"))),
+    };
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    match out.status.code() {
+        Some(0) => Some(Ok(text)),
+        Some(3) => None,
+        _ => {
+            let err = text.trim().trim_start_matches("ERROR:").trim();
+            Some(Err(if err.is_empty() {
+                "almanac sync failed".into()
+            } else {
+                err.to_string()
+            }))
+        }
     }
-    String::from_utf8(out.stdout).map_err(|e| e.to_string())
 }
 
-fn ics_from_opened(uid: &str, json: &str) -> String {
-    let summary = json_string(json, "summary").unwrap_or_else(|| "Untitled".into());
-    let start = json_string(json, "start").unwrap_or_default();
-    let end = json_string(json, "end").unwrap_or_default();
-    let all_day = json.contains("\"allDay\":true") || (start.len() == 10 && !start.contains('T'));
-    let rrule = json_string(json, "rrule").unwrap_or_default();
-    let mut lines = vec![
-        "BEGIN:VCALENDAR".into(),
-        "BEGIN:VEVENT".into(),
-        format!("UID:{uid}"),
-        format!("SUMMARY:{}", summary.replace('\\', "\\\\").replace(',', "\\,")),
-    ];
-    if all_day {
-        let day: String = start.chars().filter(|c| c.is_ascii_digit()).take(8).collect();
-        lines.push(format!("DTSTART;VALUE=DATE:{day}"));
-        if !end.is_empty() {
-            let end_day: String = end.chars().filter(|c| c.is_ascii_digit()).take(8).collect();
-            lines.push(format!("DTEND;VALUE=DATE:{end_day}"));
-        }
-    } else if !start.is_empty() {
-        lines.push(format!("DTSTART:{}", compact_stamp(&start)));
-        if !end.is_empty() {
-            lines.push(format!("DTEND:{}", compact_stamp(&end)));
-        }
-    }
-    if !rrule.is_empty() {
-        lines.push(format!("RRULE:{rrule}"));
-    }
-    lines.push("END:VEVENT".into());
-    lines.push("END:VCALENDAR".into());
-    lines.join("\n")
-}
-
-fn compact_stamp(value: &str) -> String {
-    value.chars().filter(|c| c.is_ascii_digit()).take(14).collect()
-}
-
-fn json_string(obj: &str, key: &str) -> Option<String> {
-    let pat = format!("\"{key}\":\"");
-    let at = obj.find(&pat)?;
-    let mut out = String::new();
-    let mut esc = false;
-    for c in obj[at + pat.len()..].chars() {
-        if esc {
-            out.push(match c {
-                'n' => '\n',
-                't' => '\t',
-                other => other,
-            });
-            esc = false;
-            continue;
-        }
-        if c == '\\' {
-            esc = true;
-            continue;
-        }
-        if c == '"' {
-            break;
-        }
-        out.push(c);
-    }
-    Some(out)
-}
-
+/// Fetches an ICS feed. The URL goes to curl in a config on stdin, not argv:
+/// subscribe URLs often carry a token.
 fn fetch_ics(url: &str) -> Result<String, String> {
-    let out = Command::new("curl")
+    let mut child = Command::new("curl")
         .args([
             "-fsSL",
             "--max-time",
@@ -491,10 +405,19 @@ fn fetch_ics(url: &str) -> Result<String, String> {
             "--compressed",
             "-A",
             "sd-calendar/0.2",
-            url,
+            "-K",
+            "-",
         ])
-        .output()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| format!("curl: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let quoted = url.replace('\\', "\\\\").replace('"', "\\\"");
+        let _ = writeln!(stdin, "url = \"{quoted}\"");
+    }
+    let out = child.wait_with_output().map_err(|e| format!("curl: {e}"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         return Err(if err.trim().is_empty() {

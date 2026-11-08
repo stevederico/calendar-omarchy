@@ -127,8 +127,14 @@ function buildEventBody(draft) {
   return { body: body }
 }
 
+// The script prints ERROR:conflict when a --rev is stale (HTTP 412).
+function isConflict(raw) {
+  return trim(String(raw || "")) === "ERROR:conflict"
+}
+
 function errorMessage(raw) {
   var text = String(raw || "")
+  if (isConflict(text)) return "Changed elsewhere"
   if (text.indexOf("ERROR:") === 0) text = trim(text.slice(6))
   try {
     var parsed = JSON.parse(text)
@@ -150,6 +156,7 @@ if (typeof module !== "undefined") {
     isWritable: isWritable,
     buildEventBody: buildEventBody,
     isoWhen: isoWhen,
+    isConflict: isConflict,
     errorMessage: errorMessage
   }
 }

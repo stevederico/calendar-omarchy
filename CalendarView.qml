@@ -95,7 +95,11 @@ Item {
   property int eventToken: 0
   property var pendingEvent: null
   readonly property string calendarsPath: (Quickshell.env("XDG_CONFIG_HOME") || ((Quickshell.env("HOME") || "") + "/.config")) + "/almanac/hosted-calendars.json"
-  readonly property string almanacBodyPath: (Quickshell.env("XDG_RUNTIME_DIR") || pluginDir) + "/dottie-calendar-almanac-body.json"
+  // Plaintext request bodies: the private runtime dir, else a private cache dir. Removed after each write.
+  readonly property string almanacBodyDir: Quickshell.env("XDG_RUNTIME_DIR") || ((Quickshell.env("XDG_CACHE_HOME") || ((Quickshell.env("HOME") || "") + "/.cache")) + "/dottie-calendar")
+  property string syncNotice: ""
+  // Request body per write token, removed when that write finishes (even if the editor closed).
+  property var bodyPaths: ({})
 
   function refresh() {
     var now = new Date()
@@ -246,8 +250,28 @@ Item {
     eventSaving = true
     eventError = ""
     eventToken += 1
-    pendingEvent = { op: "post", token: eventToken }
-    almanacBodyFile.setText(JSON.stringify(built.body) + "\n")
+    var path = almanacBodyDir + "/dottie-calendar-almanac-body-" + eventToken + ".json"
+    pendingEvent = { op: "post", token: eventToken, path: path, rev: built.body.uid ? eventRevOf(editingEvent) : "" }
+    var paths = Object.assign({}, bodyPaths)
+    paths[eventToken] = path
+    bodyPaths = paths
+    almanacBodyFile.path = path
+    var text = JSON.stringify(built.body) + "\n"
+    var token = eventToken
+    Qt.callLater(function () {
+      if (root.pendingEvent && root.pendingEvent.token === token) almanacBodyFile.setText(text)
+    })
+  }
+
+  // The Almanac rev the store kept for this event (from X-ALMANAC-REV), or "".
+  function eventRevOf(event) {
+    return event && event.rev ? String(event.rev) : ""
+  }
+
+  function removeBodyFile(path) {
+    if (!path) return
+    rmProc.command = ["rm", "-f", path]
+    rmProc.running = true
   }
 
   function deleteEvent(draft) {
@@ -257,13 +281,26 @@ Item {
     eventError = ""
     eventToken += 1
     pendingEvent = { op: "delete", token: eventToken }
-    almanacRemote.remove(hostedCalendarId, uid, eventToken)
+    almanacRemote.remove(hostedCalendarId, uid, eventToken, eventRevOf(editingEvent))
   }
 
   function onAlmanacFinished(op, ok, body, token) {
+    if (bodyPaths[token]) {
+      removeBodyFile(bodyPaths[token])
+      var paths = Object.assign({}, bodyPaths)
+      delete paths[token]
+      bodyPaths = paths
+    }
     if (!pendingEvent || token !== pendingEvent.token) return
     pendingEvent = null
     eventSaving = false
+    if (!ok && Almanac.isConflict(body)) {
+      // Changed elsewhere since the last sync: reload and say so.
+      closeEventEditor()
+      syncNotice = "Event changed elsewhere, reloaded"
+      runCal(["sync"])
+      return
+    }
     if (!ok) {
       eventError = Almanac.errorMessage(body)
       return
@@ -380,15 +417,18 @@ Item {
 
   FileView {
     id: almanacBodyFile
-    path: root.almanacBodyPath
     watchChanges: false
     atomicWrites: true
     printErrors: false
     onSaved: {
-      if (root.pendingEvent && root.pendingEvent.op === "post")
-        almanacRemote.post(root.hostedCalendarId, root.almanacBodyPath, root.pendingEvent.token)
+      if (root.pendingEvent && root.pendingEvent.op === "post" && root.pendingEvent.path === almanacBodyFile.path)
+        almanacRemote.post(root.hostedCalendarId, root.pendingEvent.path, root.pendingEvent.token, root.pendingEvent.rev)
+      else
+        root.removeBodyFile(almanacBodyFile.path)
     }
     onSaveFailed: {
+      if (root.pendingEvent) root.removeBodyFile(root.pendingEvent.path || "")
+      root.pendingEvent = null
       root.eventSaving = false
       root.eventError = "Could not write Almanac request"
     }
@@ -413,6 +453,10 @@ Item {
     }
     onExited: function (code) {
       root.busy = false
+      if (root.syncNotice && root.calKind === "sync") {
+        root.statusText = root.syncNotice
+        root.syncNotice = ""
+      }
       if (code === 0) {
         if (root.addingCalendar) root.closeAddForm()
         else if (root.calKind !== "unsubscribe" && root.calKind !== "rename" && root.calKind !== "color" && root.calKind !== "toggle" && !root.statusText)
@@ -424,6 +468,25 @@ Item {
         Qt.callLater(function () { root.runCal(next) })
       }
     }
+  }
+
+  // Sync every minute while the window is open (and once when it opens).
+  Timer {
+    interval: 60000
+    running: root.live
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: if (!root.busy && root.calQueue.length === 0) root.runCal(["sync"])
+  }
+
+  Process {
+    id: rmProc
+  }
+
+  Process {
+    id: bodyDirProc
+    command: ["mkdir", "-p", "-m", "700", root.almanacBodyDir]
+    Component.onCompleted: running = true
   }
 
   Timer {
