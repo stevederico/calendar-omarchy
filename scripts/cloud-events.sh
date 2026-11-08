@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Talk to Agent Cloud hosted events through almanac-lib.sh.
+# Talk to Agent Cloud hosted events through cloud-lib.sh.
 # The key stays in the config file; requests carry its token on curl's stdin.
 #
 #   list                               events as JSON, sealed ones opened
@@ -32,9 +32,9 @@ fail() {
   exit 1
 }
 
-ALMANAC_UA="${ALMANAC_UA:-Mozilla/5.0 agentcloud-calendar}"
-# shellcheck source=almanac-lib.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/almanac-lib.sh" || fail "Agent Cloud library missing"
+CLOUD_UA="${CLOUD_UA:-Mozilla/5.0 agentcloud-calendar}"
+# shellcheck source=cloud-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cloud-lib.sh" || fail "Agent Cloud library missing"
 
 CMD=""
 CAL=""
@@ -78,7 +78,7 @@ fi
 # Which calendar a subscribe URL belongs to. Reads ids and URLs only. A feed
 # subscribed on the old almanac.dottie.ai host matches its Agent Cloud URL.
 calendar_for_url() {
-  [[ -f $ALMANAC_CONFIG ]] || return 1
+  [[ -f $CLOUD_CONFIG ]] || return 1
   python3 -c 'import json, sys
 def norm(u):
     u = str(u or "").strip()
@@ -98,7 +98,7 @@ for row in rows:
     if isinstance(row, dict) and row.get("id") and want and norm(row.get("subscribe")) == want:
         print(row["id"])
         sys.exit(0)
-sys.exit(1)' "$ALMANAC_CONFIG"
+sys.exit(1)' "$CLOUD_CONFIG"
 }
 
 if [[ $CMD == ics ]]; then
@@ -106,28 +106,28 @@ if [[ $CMD == ics ]]; then
 fi
 
 if [[ $CMD == feed ]]; then
-  [[ -f $ALMANAC_CONFIG ]] || fail "No Agent Cloud calendar"
-  SUBSCRIBE=$(ALMANAC_WANT="$CAL" python3 -c 'import json, os, sys
+  [[ -f $CLOUD_CONFIG ]] || fail "No Agent Cloud calendar"
+  SUBSCRIBE=$(CLOUD_WANT="$CAL" python3 -c 'import json, os, sys
 raw = json.load(open(sys.argv[1]))
 rows = raw if isinstance(raw, list) else raw.get("calendars", [raw]) if isinstance(raw, dict) else []
-want = os.environ["ALMANAC_WANT"]
+want = os.environ["CLOUD_WANT"]
 for row in rows:
     if isinstance(row, dict) and row.get("id") and row.get("key") and (not want or row["id"] == want):
         print(row.get("subscribe") or "")
-        break' "$ALMANAC_CONFIG" 2>/dev/null) || fail "No Agent Cloud calendar"
+        break' "$CLOUD_CONFIG" 2>/dev/null) || fail "No Agent Cloud calendar"
   [[ -n $SUBSCRIBE ]] || fail "No Agent Cloud feed"
   printf '%s\n' "$SUBSCRIBE"
   exit 0
 fi
 
-almanac_load "$CAL" || fail "No Agent Cloud calendar"
-EVENTS="$ALMANAC_ROOT/events"
-OUT=$(almanac_tmp) || fail "Agent Cloud request failed"
+cloud_load "$CAL" || fail "No Agent Cloud calendar"
+EVENTS="$CLOUD_ROOT/events"
+OUT=$(cloud_tmp) || fail "Agent Cloud request failed"
 CODE=""
 
 # request METHOD URL [BODY_FILE] [IF_MATCH_REV]
 request() {
-  CODE=$(almanac_curl "$1" "$2" "$OUT" "${3-}" "${4-}") || fail "Agent Cloud request failed"
+  CODE=$(cloud_curl "$1" "$2" "$OUT" "${3-}" "${4-}") || fail "Agent Cloud request failed"
 }
 
 # Print the reply, opened. Map errors to ERROR: lines.
@@ -138,7 +138,7 @@ finish() {
       if [[ ! -s $OUT ]]; then
         printf '%s\n' '{"ok":true}'
       else
-        almanac_open event <"$OUT" || fail "sealed calendar needs the agentcloud or almanac binary"
+        cloud_open event <"$OUT" || fail "sealed calendar needs the agentcloud binary"
       fi
       exit 0
       ;;
@@ -148,7 +148,7 @@ finish() {
       ;;
     412) fail "conflict" ;;
   esac
-  err=$(almanac_error "$OUT")
+  err=$(cloud_error "$OUT")
   case "$CODE" in
     400) fail "${err:-bad event}" ;;
     401) fail "${err:-Agent Cloud key rejected}" ;;
@@ -160,7 +160,7 @@ finish() {
   fail "${err:-Agent Cloud HTTP ${CODE}}"
 }
 
-# Events as ICS for bin/sd-calendar: local wall-clock times, X-ALMANAC-REV.
+# Events as ICS for bin/sd-calendar: local wall-clock times, X-CLOUD-REV.
 to_ics() {
   python3 -c 'import json, sys
 from datetime import date, datetime, timezone
@@ -219,7 +219,7 @@ for ev in data.get("events") or []:
     rev = str(ev.get("rev") or "")
     head = ["BEGIN:VEVENT", "UID:" + str(ev["uid"]), "SUMMARY:" + esc(ev.get("summary") or "Untitled")]
     if rev:
-        head.append("X-ALMANAC-REV:" + rev)
+        head.append("X-CLOUD-REV:" + rev)
     body = dt_lines(start, local(ev.get("end"), tz), all_day)
     if ev.get("rrule"):
         body.append("RRULE:" + str(ev["rrule"]))
@@ -236,7 +236,7 @@ for ev in data.get("events") or []:
             continue
         lines += ["BEGIN:VEVENT", "UID:" + str(ev["uid"]), "SUMMARY:" + esc(o.get("summary") or ev.get("summary") or "Untitled")]
         if rev:
-            lines.append("X-ALMANAC-REV:" + rev)
+            lines.append("X-CLOUD-REV:" + rev)
         rid = local(o.get("recurrenceId"), tz)
         if rid:
             lines.append("RECURRENCE-ID;VALUE=DATE:" + rid[0])
@@ -359,8 +359,8 @@ case "$CMD" in
   ics)
     request GET "$EVENTS"
     [[ $CODE == 200 ]] || finish
-    OPENED=$(almanac_tmp) || fail "Agent Cloud request failed"
-    almanac_open event <"$OUT" >"$OPENED" || fail "sealed calendar needs the agentcloud or almanac binary"
+    OPENED=$(cloud_tmp) || fail "Agent Cloud request failed"
+    cloud_open event <"$OUT" >"$OPENED" || fail "sealed calendar needs the agentcloud binary"
     to_ics <"$OPENED" || fail "bad events"
     exit 0
     ;;
@@ -369,12 +369,12 @@ case "$CMD" in
     finish
     ;;
   skip)
-    FEED=$(almanac_feed) || fail "Agent Cloud request failed"
+    FEED=$(cloud_feed) || fail "Agent Cloud request failed"
     request GET "$EVENTS/$ITEM"
     [[ $CODE == 404 && -n $REV ]] && fail "conflict"
     [[ $CODE == 200 ]] || finish
-    CURRENT=$(almanac_tmp) || fail "Agent Cloud request failed"
-    almanac_open event <"$OUT" >"$CURRENT" || fail "sealed calendar needs the agentcloud or almanac binary"
+    CURRENT=$(cloud_tmp) || fail "Agent Cloud request failed"
+    cloud_open event <"$OUT" >"$CURRENT" || fail "sealed calendar needs the agentcloud binary"
     read -r UNREADABLE BASE_REV < <(python3 -c 'import json, sys
 d = json.load(open(sys.argv[1]))
 print("1" if d.get("unreadable") else "0", d.get("rev") or "")' "$CURRENT")
@@ -382,21 +382,21 @@ print("1" if d.get("unreadable") else "0", d.get("rev") or "")' "$CURRENT")
     # The server checks If-Match on events/{uid} only, not on its exdates
     # route, so a stale --rev is caught here as well.
     [[ -z $REV || $REV == "$BASE_REV" ]] || fail "conflict"
-    SKIPPED=$(almanac_tmp) || fail "Agent Cloud request failed"
+    SKIPPED=$(cloud_tmp) || fail "Agent Cloud request failed"
     RID=$(skip_event "$CURRENT" "$DATE" "$TIME" "$SKIPPED" 2>&1) || fail "${RID:-bad event}"
     if [[ $FEED == seal ]]; then
-      SEALED=$(almanac_tmp) || fail "Agent Cloud request failed"
-      almanac_seal_body event "$ITEM" "$SKIPPED" "$SEALED" || fail "could not seal the event"
+      SEALED=$(cloud_tmp) || fail "Agent Cloud request failed"
+      cloud_seal_body event "$ITEM" "$SKIPPED" "$SEALED" || fail "could not seal the event"
       request PUT "$EVENTS/$ITEM" "$SEALED" "$BASE_REV"
     else
-      BODY=$(almanac_tmp) || fail "Agent Cloud request failed"
+      BODY=$(cloud_tmp) || fail "Agent Cloud request failed"
       python3 -c 'import json, sys; json.dump({"recurrenceId": sys.argv[1]}, open(sys.argv[2], "w"))' "$RID" "$BODY" || fail "bad event"
       request PUT "$EVENTS/$ITEM/exdates" "$BODY" "$BASE_REV"
     fi
     finish
     ;;
   post)
-    FEED=$(almanac_feed) || fail "Agent Cloud request failed"
+    FEED=$(cloud_feed) || fail "Agent Cloud request failed"
     ITEM=$(body_uid "$BODYFILE")
     if [[ -n $ITEM ]]; then
       # Update: read, merge, PUT with If-Match. Cloudflare blocks PATCH.
@@ -408,8 +408,8 @@ print("1" if d.get("unreadable") else "0", d.get("rev") or "")' "$CURRENT")
     if [[ -z $ITEM ]]; then
       if [[ $FEED == seal ]]; then
         UID_VALUE=$(new_uid "$BODYFILE") || fail "bad event"
-        SEALED=$(almanac_tmp) || fail "Agent Cloud request failed"
-        almanac_seal_body event "$UID_VALUE" "$BODYFILE" "$SEALED" || fail "could not seal the event"
+        SEALED=$(cloud_tmp) || fail "Agent Cloud request failed"
+        cloud_seal_body event "$UID_VALUE" "$BODYFILE" "$SEALED" || fail "could not seal the event"
         request PUT "$EVENTS/$UID_VALUE" "$SEALED"
       elif [[ -n $(body_uid "$BODYFILE") ]]; then
         request PUT "$EVENTS/$(body_uid "$BODYFILE")" "$BODYFILE"
@@ -418,8 +418,8 @@ print("1" if d.get("unreadable") else "0", d.get("rev") or "")' "$CURRENT")
       fi
       finish
     fi
-    CURRENT=$(almanac_tmp) || fail "Agent Cloud request failed"
-    almanac_open event <"$OUT" >"$CURRENT" || fail "sealed calendar needs the agentcloud or almanac binary"
+    CURRENT=$(cloud_tmp) || fail "Agent Cloud request failed"
+    cloud_open event <"$OUT" >"$CURRENT" || fail "sealed calendar needs the agentcloud binary"
     read -r UNREADABLE BASE_REV < <(python3 -c 'import json, sys
 d = json.load(open(sys.argv[1]))
 print("1" if d.get("unreadable") else "0", d.get("rev") or "")' "$CURRENT")
@@ -429,11 +429,11 @@ current = json.load(open(sys.argv[1]))
 edit = json.load(open(sys.argv[2]))
 print("1" if current.get("rrule") and any(k in edit for k in ("start", "end", "allDay")) else "0")' "$CURRENT" "$BODYFILE") || fail "bad event"
     [[ $REPEATS == 0 ]] || fail "repeating event: only the title can change here"
-    MERGED=$(almanac_tmp) || fail "Agent Cloud request failed"
+    MERGED=$(cloud_tmp) || fail "Agent Cloud request failed"
     merge_event "$CURRENT" "$BODYFILE" "$MERGED" || fail "bad event"
     if [[ $FEED == seal ]]; then
-      SEALED=$(almanac_tmp) || fail "Agent Cloud request failed"
-      almanac_seal_body event "$ITEM" "$MERGED" "$SEALED" || fail "could not seal the event"
+      SEALED=$(cloud_tmp) || fail "Agent Cloud request failed"
+      cloud_seal_body event "$ITEM" "$MERGED" "$SEALED" || fail "could not seal the event"
       MERGED="$SEALED"
     fi
     # Without --rev, the rev just read guards the merge.

@@ -126,7 +126,8 @@ fn parse_vevents(ics: &str) -> Vec<RawEvent> {
         match name.as_str() {
             "UID" => event.uid = value,
             "X-ALMANAC-SEAL" => event.seal = value,
-            "X-ALMANAC-REV" => event.rev = value,
+            // X-ALMANAC-REV: what scripts before the Agent Cloud rename wrote.
+            "X-CLOUD-REV" | "X-ALMANAC-REV" => event.rev = value,
             "SUMMARY" => event.title = unescape_ics(&value),
             "STATUS" if value.eq_ignore_ascii_case("CANCELLED") => event.uid.clear(),
             "DTSTART" => apply_dt(event, &params, &value, true),

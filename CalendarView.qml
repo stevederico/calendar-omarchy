@@ -4,7 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
-import "Almanac.js" as Almanac
+import "Cloud.js" as Cloud
 
 // Month grid + subscribed calendars. Chips in cells like macOS Calendar.
 Item {
@@ -101,7 +101,7 @@ Item {
   property bool calendarsPrimary: false
   property var legacyHostedCalendars: []
   // Plaintext request bodies: the private runtime dir, else a private cache dir. Removed after each write.
-  readonly property string almanacBodyDir: Quickshell.env("XDG_RUNTIME_DIR") || ((Quickshell.env("XDG_CACHE_HOME") || ((Quickshell.env("HOME") || "") + "/.cache")) + "/agentcloud-calendar")
+  readonly property string cloudBodyDir: Quickshell.env("XDG_RUNTIME_DIR") || ((Quickshell.env("XDG_CACHE_HOME") || ((Quickshell.env("HOME") || "") + "/.cache")) + "/agentcloud-calendar")
   property string syncNotice: ""
   // Request body per write token, removed when that write finishes (even if the editor closed).
   property var bodyPaths: ({})
@@ -157,7 +157,7 @@ Item {
     eventsByDate = parsed.eventsByDate
     for (var c = 0; c < parsed.calendars.length; c++) {
       var cal = parsed.calendars[c]
-      if (cal && cal.name === "Almanac") cal.name = Almanac.PRODUCT
+      if (cal && cal.name === "Almanac") cal.name = Cloud.PRODUCT
     }
     calendars = parsed.calendars
     if (detailCalendar && detailCalendar.id) {
@@ -210,20 +210,20 @@ Item {
   }
 
   function eventUidOf(event) {
-    return Almanac.eventUid(event)
+    return Cloud.eventUid(event)
   }
 
   function canEditEvent(event) {
     if (!hostedCalendarId) return false
     if (!event || !event.id) return true
-    return Almanac.isWritable(event, calendars)
+    return Cloud.isWritable(event, calendars)
   }
 
   function openNewEvent() {
     eventError = ""
     editingEvent = {
       id: "",
-      calendarId: "almanac",
+      calendarId: "cloud",
       dateKey: selectedKey,
       title: "",
       start: "09:00",
@@ -251,7 +251,7 @@ Item {
       eventError = "No Agent Cloud calendar"
       return
     }
-    var built = Almanac.buildEventBody(draft)
+    var built = Cloud.buildEventBody(draft)
     if (built.error) {
       eventError = built.error
       return
@@ -260,9 +260,9 @@ Item {
     var copy = null
     if (body.uid) {
       // Saved as a new event if the server refuses this edit.
-      copy = Almanac.conflictCopy(body)
+      copy = Cloud.conflictCopy(body)
       // Only the title changed: leave the times alone, so a repeating series stays put.
-      if (editingEvent && Almanac.sameWhen(editingEvent, draft)) body = { uid: body.uid, summary: body.summary }
+      if (editingEvent && Cloud.sameWhen(editingEvent, draft)) body = { uid: body.uid, summary: body.summary }
     }
     writeEvent(body, body.uid ? eventRevOf(editingEvent) : "", copy)
   }
@@ -272,20 +272,20 @@ Item {
     eventSaving = true
     eventError = ""
     eventToken += 1
-    var path = almanacBodyDir + "/agentcloud-calendar-body-" + eventToken + ".json"
+    var path = cloudBodyDir + "/agentcloud-calendar-body-" + eventToken + ".json"
     pendingEvent = { op: "post", token: eventToken, path: path, rev: rev, copy: copy }
     var paths = Object.assign({}, bodyPaths)
     paths[eventToken] = path
     bodyPaths = paths
-    almanacBodyFile.path = path
+    cloudBodyFile.path = path
     var text = JSON.stringify(body) + "\n"
     var token = eventToken
     Qt.callLater(function () {
-      if (root.pendingEvent && root.pendingEvent.token === token) almanacBodyFile.setText(text)
+      if (root.pendingEvent && root.pendingEvent.token === token) cloudBodyFile.setText(text)
     })
   }
 
-  // The Almanac rev the store kept for this event (from X-ALMANAC-REV), or "".
+  // The Cloud rev the store kept for this event (from X-CLOUD-REV), or "".
   function eventRevOf(event) {
     return event && event.rev ? String(event.rev) : ""
   }
@@ -309,23 +309,23 @@ Item {
   // allDates: delete the whole series. Otherwise a repeating event skips only
   // the date it was opened on (an exdate); a single event is deleted.
   function deleteEvent(draft, allDates) {
-    var uid = Almanac.eventUid(draft) || (editingEvent ? Almanac.eventUid(editingEvent) : "")
+    var uid = Cloud.eventUid(draft) || (editingEvent ? Cloud.eventUid(editingEvent) : "")
     if (!uid || !hostedCalendarId || eventSaving) return
     eventSaving = true
     eventError = ""
     eventToken += 1
     var rev = eventRevOf(editingEvent)
-    if (Almanac.repeats(editingEvent) && !allDates) {
-      var when = Almanac.occurrenceOf(editingEvent)
+    if (Cloud.repeats(editingEvent) && !allDates) {
+      var when = Cloud.occurrenceOf(editingEvent)
       pendingEvent = { op: "skip", token: eventToken }
-      almanacRemote.skip(hostedCalendarId, uid, when.date, when.time, eventToken, rev)
+      cloudRemote.skip(hostedCalendarId, uid, when.date, when.time, eventToken, rev)
       return
     }
     pendingEvent = { op: "delete", token: eventToken }
-    almanacRemote.remove(hostedCalendarId, uid, eventToken, rev)
+    cloudRemote.remove(hostedCalendarId, uid, eventToken, rev)
   }
 
-  function onAlmanacFinished(op, ok, body, token) {
+  function onCloudFinished(op, ok, body, token) {
     if (bodyPaths[token]) {
       removeBodyFile(bodyPaths[token])
       var paths = Object.assign({}, bodyPaths)
@@ -336,13 +336,13 @@ Item {
     var job = pendingEvent
     pendingEvent = null
     eventSaving = false
-    if (!ok && Almanac.isConflict(body) && job.copy) {
+    if (!ok && Cloud.isConflict(body) && job.copy) {
       // Changed or deleted elsewhere: keep the server's event and save ours as a new one.
       syncNotice = "Event changed elsewhere, saved a copy"
       writeEvent(job.copy, "", null)
       return
     }
-    if (!ok && Almanac.isConflict(body)) {
+    if (!ok && Cloud.isConflict(body)) {
       // Changed elsewhere since the last sync: reload and say so.
       closeEventEditor()
       syncNotice = "Event changed elsewhere, reloaded"
@@ -350,7 +350,7 @@ Item {
       return
     }
     if (!ok) {
-      eventError = Almanac.errorMessage(body)
+      eventError = Cloud.errorMessage(body)
       return
     }
     closeEventEditor()
@@ -395,7 +395,7 @@ Item {
       root.statusText = "Paste an ICS URL"
       return
     }
-    if (!name) name = Almanac.isAlmanacUrl(url) ? Almanac.PRODUCT : "Calendar"
+    if (!name) name = Cloud.isCloudUrl(url) ? Cloud.PRODUCT : "Calendar"
     root.runCal(["subscribe", name, url])
   }
 
@@ -453,7 +453,7 @@ Item {
     onLoadFailed: root.applyEvents("")
   }
 
-  // Same choice as almanac-lib.sh: the Agent Cloud file when it exists, else the old almanac one.
+  // Same choice as cloud-lib.sh: the Agent Cloud file when it exists, else the old almanac one.
   FileView {
     id: hostedFile
     path: root.calendarsPath
@@ -462,7 +462,7 @@ Item {
     onFileChanged: reload()
     onLoaded: {
       root.calendarsPrimary = true
-      root.hostedCalendars = Almanac.parseCalendars(text())
+      root.hostedCalendars = Cloud.parseCalendars(text())
     }
     onLoadFailed: {
       root.calendarsPrimary = false
@@ -477,7 +477,7 @@ Item {
     printErrors: false
     onFileChanged: reload()
     onLoaded: {
-      root.legacyHostedCalendars = Almanac.parseCalendars(text())
+      root.legacyHostedCalendars = Cloud.parseCalendars(text())
       if (!root.calendarsPrimary) root.hostedCalendars = root.legacyHostedCalendars
     }
     onLoadFailed: {
@@ -487,15 +487,15 @@ Item {
   }
 
   FileView {
-    id: almanacBodyFile
+    id: cloudBodyFile
     watchChanges: false
     atomicWrites: true
     printErrors: false
     onSaved: {
-      if (root.pendingEvent && root.pendingEvent.op === "post" && root.pendingEvent.path === almanacBodyFile.path)
-        almanacRemote.post(root.hostedCalendarId, root.pendingEvent.path, root.pendingEvent.token, root.pendingEvent.rev)
+      if (root.pendingEvent && root.pendingEvent.op === "post" && root.pendingEvent.path === cloudBodyFile.path)
+        cloudRemote.post(root.hostedCalendarId, root.pendingEvent.path, root.pendingEvent.token, root.pendingEvent.rev)
       else
-        root.removeBodyFile(almanacBodyFile.path)
+        root.removeBodyFile(cloudBodyFile.path)
     }
     onSaveFailed: {
       if (root.pendingEvent) root.removeBodyFile(root.pendingEvent.path || "")
@@ -505,10 +505,10 @@ Item {
     }
   }
 
-  AlmanacRemote {
-    id: almanacRemote
+  CloudRemote {
+    id: cloudRemote
     onFinished: function (op, ok, body, token) {
-      root.onAlmanacFinished(op, ok, body, token)
+      root.onCloudFinished(op, ok, body, token)
     }
   }
 
@@ -561,7 +561,7 @@ Item {
 
   Process {
     id: bodyDirProc
-    command: ["mkdir", "-p", "-m", "700", root.almanacBodyDir]
+    command: ["mkdir", "-p", "-m", "700", root.cloudBodyDir]
     Component.onCompleted: running = true
   }
 

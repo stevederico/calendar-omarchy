@@ -20,7 +20,7 @@ pub struct Event {
     pub end: String,
     pub color: String,
     pub all_day: bool,
-    /// Almanac rev of the event this row came from; empty for other feeds.
+    /// Agent Cloud rev of the event this row came from; empty for other feeds.
     pub rev: String,
     /// One date of a repeating event (or a moved date of one).
     pub repeats: bool,

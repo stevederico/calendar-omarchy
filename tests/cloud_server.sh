@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# bash tests/almanac_server.sh
-# Runs scripts/almanac-events.sh and `bin/sd-calendar sync` against a throwaway
+# bash tests/cloud_server.sh
+# Runs scripts/cloud-events.sh and `bin/sd-calendar sync` against a throwaway
 # Agent Cloud server (AGENTCLOUD_BIN or ALMANAC_BIN, 0.34 or later) with one plain and one sealed
 # calendar. SD_CALENDAR_BIN picks another sd-calendar build. Prints TAP-ish lines.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
-script="$here/../scripts/almanac-events.sh"
+script="$here/../scripts/cloud-events.sh"
 BIN="${AGENTCLOUD_BIN:-${ALMANAC_BIN:-$HOME/Projects/agentcloud/target/debug/agentcloud}}"
 [[ -z ${AGENTCLOUD_BIN-}${ALMANAC_BIN-} && ! -x $BIN ]] && BIN="$HOME/Projects/almanac/target/debug/almanac"
 if [[ ! -x $BIN ]]; then
@@ -62,7 +62,7 @@ touch "$work/watch"
 watcher=$!
 
 run() {
-  PATH="$work/bin:$PATH" XDG_RUNTIME_DIR="$work/run" ALMANAC_CONFIG="$work/creds.json" ALMANAC_BIN="$BIN" \
+  PATH="$work/bin:$PATH" XDG_RUNTIME_DIR="$work/run" CLOUD_CONFIG="$work/creds.json" AGENTCLOUD_BIN="$BIN" \
     bash "$script" "$@" <"${RUN_STDIN:-/dev/null}" >"$work/out" 2>"$work/err"
   local status=$?
   cat "$work/out" >>"$work/all-out"
@@ -89,7 +89,7 @@ print(datetime.fromisoformat(sys.argv[1]).replace(tzinfo=ZoneInfo("America/Los_A
 }
 # The exdates GET changes reports for one event, opened when sealed.
 changes_exdates() {
-  ALMANAC_CREDS="$work/creds.json" python3 - "$work/creds.json" "$1" "$2" "$BIN" <<'PY'
+  AGENTCLOUD_CREDS="$work/creds.json" python3 - "$work/creds.json" "$1" "$2" "$BIN" <<'PY'
 import hashlib, json, subprocess, sys, urllib.request
 creds, name, uid, binary = sys.argv[1:]
 row = [r for r in json.load(open(creds)) if r["name"] == name][0]
@@ -144,7 +144,7 @@ for feed in plain seal; do
   RUN_STDIN="$work/url" run ics
   check "$feed: ics" "$?" "0"
   check "$feed: ics has the events" "$(grep -c '^SUMMARY:\(Dentist\|Standup v2\)' "$work/out")" "2"
-  check "$feed: ics has revs" "$(grep -c "^X-ALMANAC-REV:\($rev\|$srev2\)" "$work/out")" "2"
+  check "$feed: ics has revs" "$(grep -c "^X-CLOUD-REV:\($rev\|$srev2\)" "$work/out")" "2"
   check "$feed: ics keeps the rule" "$(grep -c '^RRULE:FREQ=DAILY' "$work/out")" "1"
 
   printf '{"summary":"Dentist","start":"%s"}' "$(at "$d2" 09:00:00)" >"$work/body.json"
@@ -188,8 +188,8 @@ check "unknown calendar" "$(cat "$work/out")" "ERROR:No Agent Cloud calendar"
 cal_bin="${SD_CALENDAR_BIN:-$here/../bin/sd-calendar}"
 export XDG_STATE_HOME="$work/state"
 # A build outside bin/ cannot find ../scripts on its own.
-[[ -n ${SD_CALENDAR_BIN-} ]] && export SD_CALENDAR_ALMANAC_SCRIPT="$script"
-sd() { PATH="$work/bin:$PATH" XDG_RUNTIME_DIR="$work/run" ALMANAC_CONFIG="$work/creds.json" ALMANAC_BIN="$BIN" "$cal_bin" "$@" >"$work/out" 2>"$work/err"; }
+[[ -n ${SD_CALENDAR_BIN-} ]] && export SD_CALENDAR_CLOUD_SCRIPT="$script"
+sd() { PATH="$work/bin:$PATH" XDG_RUNTIME_DIR="$work/run" CLOUD_CONFIG="$work/creds.json" AGENTCLOUD_BIN="$BIN" "$cal_bin" "$@" >"$work/out" 2>"$work/err"; }
 for feed in plain seal; do
   sd subscribe "$feed" "$(sub "$feed")"
   check "sd-calendar subscribe $feed" "$?" "0"
@@ -229,7 +229,7 @@ rm -f "$work/watch"
 wait "$watcher" 2>/dev/null
 watcher=""
 
-check "ps saw the script run" "$(grep -c 'almanac-events.sh' "$work/ps.log" | awk '{print ($1 > 0) ? "yes" : "no"}')" "yes"
+check "ps saw the script run" "$(grep -c 'cloud-events.sh' "$work/ps.log" | awk '{print ($1 > 0) ? "yes" : "no"}')" "yes"
 check "no key or token in ps" "$(grep -cF -f "$work/secrets" "$work/ps.log")" "0"
 check "curl ran through the wrapper" "$(awk 'END {print (NR > 0) ? "yes" : "no"}' "$work/curl-argv.log")" "yes"
 check "no key or token in curl argv" "$(grep -cF -f "$work/secrets" "$work/curl-argv.log")" "0"

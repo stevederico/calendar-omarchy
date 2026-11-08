@@ -1,4 +1,4 @@
-// Agent Cloud hosted events (the almanac server). No I/O. QML and Node tests share this file.
+// Agent Cloud hosted events (the agentcloud server). No I/O. QML and Node tests share this file.
 
 var PRODUCT = "Agent Cloud"
 
@@ -63,18 +63,18 @@ function eventUid(event) {
 }
 
 // Agent Cloud feeds, on the current host or the old one.
-function isAlmanacUrl(url) {
+function isCloudUrl(url) {
   var text = String(url || "")
   return text.indexOf("cloud.bixbyapps.com") >= 0 || text.indexOf("almanac.dottie.ai") >= 0
 }
 
 function isWritable(event, calendars) {
   if (!event) return false
-  if (String(event.calendarId || "") === "almanac") return true
+  if (String(event.calendarId || "") === "cloud") return true
   var id = String(event.calendarId || "")
   var rows = calendars || []
   for (var i = 0; i < rows.length; i++) {
-    if (rows[i] && rows[i].id === id && isAlmanacUrl(rows[i].url)) return true
+    if (rows[i] && rows[i].id === id && isCloudUrl(rows[i].url)) return true
   }
   return false
 }
@@ -163,7 +163,7 @@ function repeats(event) {
 }
 
 // The date (and start time, "" when all-day) the calendar shows for one
-// occurrence: what `almanac-events.sh skip` takes as --date and --time.
+// occurrence: what `cloud-events.sh skip` takes as --date and --time.
 function occurrenceOf(event) {
   var allDay = !!(event && (event.allDay || !event.start))
   return { date: trim(event && event.dateKey), time: allDay ? "" : trim(event.start) }
@@ -203,7 +203,7 @@ if (typeof module !== "undefined") {
   module.exports = {
     PRODUCT: PRODUCT,
     displayName: displayName,
-    isAlmanacUrl: isAlmanacUrl,
+    isCloudUrl: isCloudUrl,
     parseCalendars: parseCalendars,
     resolveCalendar: resolveCalendar,
     eventUid: eventUid,

@@ -1,3 +1,11 @@
+0.10.0
+
+  Rename code to Cloud
+  Use cloud-lib.sh
+  Send X-CLOUD-REV
+  Add SD_CALENDAR_CLOUD_SCRIPT
+  Rebuild sd-calendar
+
 0.9.0
 
   Rename to Agent Cloud
