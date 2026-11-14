@@ -1,3 +1,7 @@
+0.11.0
+
+  Add menu launcher
+
 0.10.1
 
   Restore ALMANAC fallbacks

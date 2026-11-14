@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "sd.calendar",
   "name": "Agent Cloud Calendar",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "author": "sd",
   "license": "MIT",
   "description": "Agent Cloud Calendar. Day, week, month, year. Agent Cloud events plus ICS feeds. Search agentcloud or calendar.",
@@ -27,5 +27,10 @@
     ],
     "allowMultiple": false,
     "defaultSection": "right"
+  },
+  "menuItem": {
+    "label": "Calendar",
+    "icon": "󰃭",
+    "description": "Day week month year calendar"
   }
 }
