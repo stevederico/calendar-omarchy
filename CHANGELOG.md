@@ -1,3 +1,7 @@
+0.12.0
+
+  Replace var with const
+
 0.11.0
 
   Add menu launcher
