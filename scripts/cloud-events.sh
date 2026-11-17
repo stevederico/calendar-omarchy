@@ -1,30 +1,4 @@
 #!/usr/bin/env bash
-# Talk to Agent Cloud hosted events through cloud-lib.sh.
-# The key stays in the config file; requests carry its token on curl's stdin.
-#
-#   list                               events as JSON, sealed ones opened
-#   post   --body-file FILE [--rev N]  a body with a uid updates that event
-#   delete --uid UID [--rev N]         the event, or every date of a series
-#   skip   --uid UID --date YYYY-MM-DD [--time HH:MM] [--rev N]
-#                                      one date of a repeating event
-#   feed                             the calendar's subscribe URL
-#   ics                                read a subscribe URL on stdin; print that
-#                                      calendar's events as ICS (exit 3: not Agent Cloud)
-#
-# An update keeps the fields the editor does not own (location, description,
-# repeat rule, time zone, skipped and moved dates). An update of a repeating
-# event may change its title only: the editor shows one date, and its times
-# would move the whole series. Prints JSON on success, `ERROR:<text>`
-# otherwise. A stale --rev, or one for an event deleted since, prints
-# `ERROR:conflict`.
-#
-# skip takes the date and start time the calendar shows (local time) and adds
-# that occurrence's recurrence id to the event's exdates: the series' wall
-# clock in its time zone, or YYYY-MM-DD when all-day, so the feed drops exactly
-# that date. A moved date (override) is skipped by its own recurrence id. A
-# plain calendar uses the exdates route. A sealed calendar's server refuses
-# that route and cannot read the event, so there the exdate lives inside the
-# seal: open, add, seal again, PUT with If-Match.
 set -u
 
 fail() {
@@ -75,8 +49,6 @@ if [[ $CMD == skip ]]; then
 fi
 [[ -z $REV || $REV =~ ^[0-9]+$ ]] || fail "bad rev"
 
-# Which calendar a subscribe URL belongs to. Reads ids and URLs only. A feed
-# subscribed on the old almanac.dottie.ai host matches its Agent Cloud URL.
 calendar_for_url() {
   [[ -f $CLOUD_CONFIG ]] || return 1
   python3 -c 'import json, sys
@@ -125,12 +97,10 @@ EVENTS="$CLOUD_ROOT/events"
 OUT=$(cloud_tmp) || fail "Agent Cloud request failed"
 CODE=""
 
-# request METHOD URL [BODY_FILE] [IF_MATCH_REV]
 request() {
   CODE=$(cloud_curl "$1" "$2" "$OUT" "${3-}" "${4-}") || fail "Agent Cloud request failed"
 }
 
-# Print the reply, opened. Map errors to ERROR: lines.
 finish() {
   local err
   case "$CODE" in
@@ -160,7 +130,6 @@ finish() {
   fail "${err:-Agent Cloud HTTP ${CODE}}"
 }
 
-# Events as ICS for bin/sd-calendar: local wall-clock times, X-CLOUD-REV.
 to_ics() {
   python3 -c 'import json, sys
 from datetime import date, datetime, timezone
@@ -264,9 +233,6 @@ except Exception:
 sys.stdout.write(str(d.get("uid") or "").strip() if isinstance(d, dict) else "")' "$1"
 }
 
-# The editor owns summary, start, end, allDay (only summary when the edit has
-# no start: a title-only edit). Everything else comes from the current event,
-# so a PUT (which needs the full body) loses nothing.
 merge_event() {
   python3 -c 'import json, sys
 current = json.load(open(sys.argv[1]))
@@ -282,8 +248,6 @@ for k in owned:
 json.dump(out, open(sys.argv[3], "w"))' "$1" "$2" "$3"
 }
 
-# skip_event CURRENT DATE TIME OUT: writes the event with that shown date in
-# its exdates (and no override for it) to OUT, and prints the recurrence id.
 skip_event() {
   python3 -c 'import json, sys
 from datetime import datetime
@@ -305,14 +269,12 @@ if ev.get("timeZone") and ZoneInfo:
 start = str(ev.get("start") or "")
 all_day = bool(ev.get("allDay")) or len(start) == 10
 
-# A timed value as an aware datetime: floating ones in the series zone, else local.
 def parse(text):
     dt = datetime.fromisoformat(str(text).replace("Z", "+00:00"))
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=zone) if zone else dt.astimezone()
     return dt
 
-# (YYYY-MM-DD, HH:MM) as the calendar shows it, in local time.
 def shown(text):
     text = str(text or "")
     if len(text) == 10:
@@ -333,8 +295,6 @@ for o in moved:
 if not rid and all_day:
     rid = day
 if not rid:
-    # The shown date and time, back in the series zone. The time of day is the
-    # series start there, so the id is the one the server and the feed use.
     series = parse(start)
     if zone:
         series = series.astimezone(zone)
@@ -379,8 +339,6 @@ case "$CMD" in
 d = json.load(open(sys.argv[1]))
 print("1" if d.get("unreadable") else "0", d.get("rev") or "")' "$CURRENT")
     [[ $UNREADABLE == 0 ]] || fail "could not open the seal"
-    # The server checks If-Match on events/{uid} only, not on its exdates
-    # route, so a stale --rev is caught here as well.
     [[ -z $REV || $REV == "$BASE_REV" ]] || fail "conflict"
     SKIPPED=$(cloud_tmp) || fail "Agent Cloud request failed"
     RID=$(skip_event "$CURRENT" "$DATE" "$TIME" "$SKIPPED" 2>&1) || fail "${RID:-bad event}"
@@ -399,11 +357,10 @@ print("1" if d.get("unreadable") else "0", d.get("rev") or "")' "$CURRENT")
     FEED=$(cloud_feed) || fail "Agent Cloud request failed"
     ITEM=$(body_uid "$BODYFILE")
     if [[ -n $ITEM ]]; then
-      # Update: read, merge, PUT with If-Match. Cloudflare blocks PATCH.
       request GET "$EVENTS/$ITEM"
       [[ $CODE == 404 && -n $REV ]] && fail "conflict"
       [[ $CODE == 200 || ( $CODE == 404 && -z $REV ) ]] || finish
-      [[ $CODE == 404 ]] && ITEM=""   # a new event with a chosen uid
+      [[ $CODE == 404 ]] && ITEM=""
     fi
     if [[ -z $ITEM ]]; then
       if [[ $FEED == seal ]]; then
@@ -436,7 +393,6 @@ print("1" if current.get("rrule") and any(k in edit for k in ("start", "end", "a
       cloud_seal_body event "$ITEM" "$MERGED" "$SEALED" || fail "could not seal the event"
       MERGED="$SEALED"
     fi
-    # Without --rev, the rev just read guards the merge.
     request PUT "$EVENTS/$ITEM" "$MERGED" "${REV:-$BASE_REV}"
     finish
     ;;

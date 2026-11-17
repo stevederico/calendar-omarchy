@@ -322,7 +322,6 @@ test("cloud-events.sh skip adds the occurrence's exdate in the series zone", asy
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agentcloud-cal-"))
   const env = { CLOUD_CONFIG: writeConfig(dir, port), TZ: "America/New_York" }
   const run = (...args) => runScript(["skip", "--cal", "cal_test", ...args], env)
-  // 09:00 in Los Angeles shows as 12:00 in New York.
   const timed = await run("--uid", "weekly", "--date", "2026-10-06", "--time", "12:00", "--rev", "9")
   const moved = await run("--uid", "weekly", "--date", "2026-10-14", "--time", "13:00", "--rev", "9")
   const allDay = await run("--uid", "allday", "--date", "2026-10-06")

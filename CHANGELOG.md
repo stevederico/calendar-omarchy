@@ -1,3 +1,7 @@
+0.13.0
+
+  Remove code comments
+
 0.12.0
 
   Replace var with const

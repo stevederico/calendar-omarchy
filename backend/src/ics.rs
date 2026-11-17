@@ -10,7 +10,6 @@ struct RawEvent {
     start_hm: String,
     end_hm: String,
     rrule: Option<RRule>,
-    /// A moved date of a series (RECURRENCE-ID): no RRULE of its own.
     moved: bool,
     exdates: Vec<i32>,
     seal: String,
@@ -126,7 +125,6 @@ fn parse_vevents(ics: &str) -> Vec<RawEvent> {
         match name.as_str() {
             "UID" => event.uid = value,
             "X-ALMANAC-SEAL" => event.seal = value,
-            // X-ALMANAC-REV: what scripts before the Agent Cloud rename wrote.
             "X-CLOUD-REV" | "X-ALMANAC-REV" => event.rev = value,
             "SUMMARY" => event.title = unescape_ics(&value),
             "STATUS" if value.eq_ignore_ascii_case("CANCELLED") => event.uid.clear(),
@@ -518,12 +516,10 @@ fn add_years(c: Civil, years: i32) -> Civil {
 }
 
 fn weekday(c: Civil) -> i32 {
-    // 1970-01-01 was Thursday = 4
     (4 + ordinal(c)).rem_euclid(7)
 }
 
 pub fn today_ordinal() -> i32 {
-    // Local civil date via /bin/date so we stay crate-free and timezone-honest.
     if let Ok(out) = std::process::Command::new("date")
         .args(["+%Y-%m-%d"])
         .output()

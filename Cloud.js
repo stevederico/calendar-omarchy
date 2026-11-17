@@ -1,5 +1,3 @@
-// Agent Cloud hosted events (the agentcloud server). No I/O. QML and Node tests share this file.
-
 var PRODUCT = "Agent Cloud"
 
 function trim(s) {
@@ -11,7 +9,6 @@ function pad2(value) {
   return (n < 10 ? "0" : "") + n
 }
 
-// The old default names ("Almanac", "Dottie") show as Agent Cloud.
 function displayName(name) {
   const text = trim(name)
   if (!text || text === "Almanac" || text === "Dottie") return PRODUCT
@@ -62,7 +59,6 @@ function eventUid(event) {
   return ""
 }
 
-// Agent Cloud feeds, on the current host or the old one.
 function isCloudUrl(url) {
   const text = String(url || "")
   return text.indexOf("cloud.bixbyapps.com") >= 0 || text.indexOf("almanac.dottie.ai") >= 0
@@ -138,7 +134,6 @@ function buildEventBody(draft) {
   return { body: body }
 }
 
-// The date and times the editor shows for an event (as EventEditor.fill() does).
 function editorWhen(event) {
   const allDay = !!(event && (event.allDay || !event.start))
   return {
@@ -149,7 +144,6 @@ function editorWhen(event) {
   }
 }
 
-// True when a draft keeps the event's date and times: only the title changed.
 function sameWhen(event, draft) {
   const was = editorWhen(event)
   const allDay = !!(draft && draft.allDay)
@@ -157,19 +151,15 @@ function sameWhen(event, draft) {
   return allDay || (trim(draft.start) === was.start && trim(draft.end) === was.end)
 }
 
-// True for one date of a repeating event (sd-calendar marks it `repeats`).
 function repeats(event) {
   return !!(event && event.repeats)
 }
 
-// The date (and start time, "" when all-day) the calendar shows for one
-// occurrence: what `cloud-events.sh skip` takes as --date and --time.
 function occurrenceOf(event) {
   const allDay = !!(event && (event.allDay || !event.start))
   return { date: trim(event && event.dateKey), time: allDay ? "" : trim(event.start) }
 }
 
-// The body that saves an edit the server refused as a new event.
 function conflictCopy(body) {
   const suffix = " (conflict copy)"
   const copy = {}
@@ -178,7 +168,6 @@ function conflictCopy(body) {
   return copy
 }
 
-// The script prints ERROR:conflict when a --rev is stale (HTTP 412).
 function isConflict(raw) {
   return trim(String(raw || "")) === "ERROR:conflict"
 }

@@ -1,5 +1,3 @@
-//! Calendar store + ICS subscribe. Std only. Fetch via system curl.
-
 mod ics;
 mod store;
 
@@ -332,8 +330,6 @@ fn sync_one(store: &mut Store, id: &str) -> Result<usize, String> {
     if cal.url.is_empty() {
         return Ok(store.events.iter().filter(|e| e.calendar_id == id).count());
     }
-    // An Agent Cloud calendar syncs from its JSON API through the script (which
-    // opens sealed events); any other feed is plain ICS.
     let ics_text = match cloud_ics(&cal.url) {
         Some(result) => result?,
         None => fetch_ics(&cal.url)?,
@@ -346,8 +342,6 @@ fn sync_one(store: &mut Store, id: &str) -> Result<usize, String> {
     Ok(count)
 }
 
-/// `scripts/cloud-events.sh` next to `bin/`, or `SD_CALENDAR_CLOUD_SCRIPT`
-/// (`SD_CALENDAR_ALMANAC_SCRIPT`, its name before the Agent Cloud rename, still works).
 fn cloud_script() -> Option<PathBuf> {
     if let Some(path) = env::var_os("SD_CALENDAR_CLOUD_SCRIPT").or_else(|| env::var_os("SD_CALENDAR_ALMANAC_SCRIPT")) {
         let path = PathBuf::from(path);
@@ -358,9 +352,6 @@ fn cloud_script() -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-/// Asks the script for this feed URL as ICS. `None` when the URL is not one of
-/// the Agent Cloud calendars in the credentials file (exit 3) or there is no script.
-/// The URL goes on stdin: it carries the feed token.
 fn cloud_ics(url: &str) -> Option<Result<String, String>> {
     let script = cloud_script()?;
     let child = Command::new("bash")
@@ -396,8 +387,6 @@ fn cloud_ics(url: &str) -> Option<Result<String, String>> {
     }
 }
 
-/// Fetches an ICS feed. The URL goes to curl in a config on stdin, not argv:
-/// subscribe URLs often carry a token.
 fn fetch_ics(url: &str) -> Result<String, String> {
     let mut child = Command::new("curl")
         .args([

@@ -20,9 +20,7 @@ pub struct Event {
     pub end: String,
     pub color: String,
     pub all_day: bool,
-    /// Agent Cloud rev of the event this row came from; empty for other feeds.
     pub rev: String,
-    /// One date of a repeating event (or a moved date of one).
     pub repeats: bool,
 }
 
@@ -74,8 +72,6 @@ pub fn load(path: &PathBuf) -> Result<Store, String> {
     parse_store(&text)
 }
 
-/// Writes the store owner-only (0600): it can hold opened sealed events.
-/// Missing parent directories are made 0700.
 pub fn save(path: &PathBuf, store: &Store) -> Result<(), String> {
     use std::io::Write;
     use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};

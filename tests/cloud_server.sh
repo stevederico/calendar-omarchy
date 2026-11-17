@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# bash tests/cloud_server.sh
-# Runs scripts/cloud-events.sh and `bin/sd-calendar sync` against a throwaway
-# Agent Cloud server (AGENTCLOUD_BIN or ALMANAC_BIN, 0.34 or later) with one plain and one sealed
-# calendar. SD_CALENDAR_BIN picks another sd-calendar build. Prints TAP-ish lines.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 script="$here/../scripts/cloud-events.sh"
@@ -27,7 +23,6 @@ check() {
   if [[ $2 == "$3" ]]; then echo "ok - $1"; else echo "not ok - $1: got [$2] want [$3]"; fails=$((fails + 1)); fi
 }
 
-# Two calendars. Their keys and tokens go to a secrets file, never to stdout.
 for feed in plain seal; do
   curl -s -H 'content-type: application/json' -H 'accept: application/json' \
     -d "{\"feed\":\"$feed\"}" "http://127.0.0.1:$port/calendars" >"$work/$feed.json"
@@ -46,7 +41,6 @@ open(os.path.join(work, "secrets"), "w").write("\n".join(secrets) + "\n")
 PY
 chmod 600 "$work/creds.json" "$work/secrets"
 
-# curl that records its argv, so the test sees what `ps` would.
 mkdir -p "$work/bin" "$work/run"
 chmod 700 "$work/run"
 real_curl=$(command -v curl)
@@ -78,16 +72,13 @@ series_start=$(day "-1 day")
 skip=$(day "+6 days")
 sub() { python3 -c 'import json,sys; print([r["subscribe"] for r in json.load(open(sys.argv[1])) if r["name"] == sys.argv[2]][0])' "$work/creds.json" "$1"; }
 
-# A weekly series at 09:00 Los Angeles; its second date is the one skipped.
 week1=$(day "+1 day")
 week2=$(day "+8 days")
 week3=$(day "+15 days")
-# A Los Angeles wall clock as the calendar shows it: local "YYYY-MM-DD HH:MM".
 shown() {
   python3 -c 'import sys; from datetime import datetime; from zoneinfo import ZoneInfo
 print(datetime.fromisoformat(sys.argv[1]).replace(tzinfo=ZoneInfo("America/Los_Angeles")).astimezone().strftime("%Y-%m-%d %H:%M"))' "$1"
 }
-# The exdates GET changes reports for one event, opened when sealed.
 changes_exdates() {
   AGENTCLOUD_CREDS="$work/creds.json" python3 - "$work/creds.json" "$1" "$2" "$BIN" <<'PY'
 import hashlib, json, subprocess, sys, urllib.request
@@ -115,18 +106,15 @@ for feed in plain seal; do
   rev=$(field 'd["rev"]')
   check "$feed: post prints the event" "$(field 'd["summary"]')" "Dentist"
 
-  # A daily series with a place, a time zone and a skipped day, made with a chosen uid.
   printf '{"uid":"standup","summary":"Standup","start":"%sT09:00:00","end":"%sT09:15:00","timeZone":"America/Los_Angeles","rrule":"FREQ=DAILY","location":"Room 4"}' "$series_start" "$series_start" >"$work/body.json"
   run post --cal "$cal" --body-file "$work/body.json"
   check "$feed: post with a new uid creates" "$(field 'd["uid"]')" "standup"
   srev=$(field 'd["rev"]')
 
-  # The editor shows one date of a series: its times would move the whole series.
   printf '{"uid":"standup","summary":"Standup v2","start":"%sT10:00:00","end":"%sT10:15:00"}' "$skip" "$skip" >"$work/body.json"
   run post --cal "$cal" --rev "$srev" --body-file "$work/body.json"
   check "$feed: series times are refused" "$(cat "$work/out")" "ERROR:repeating event: only the title can change here"
 
-  # A title-only edit sends summary alone; the update keeps the rest.
   printf '{"uid":"standup","summary":"Standup v2"}' >"$work/body.json"
   run post --cal "$cal" --rev "$srev" --body-file "$work/body.json"
   check "$feed: update with rev" "$?" "0"
@@ -157,7 +145,6 @@ for feed in plain seal; do
   run post --cal "$cal" --rev "$drev" --body-file "$work/body.json"
   check "$feed: update of a deleted event is a conflict" "$(cat "$work/out")" "ERROR:conflict"
 
-  # Delete one date of a weekly series: an exdate on that uid, the rest stays.
   printf '{"uid":"weekly","summary":"Weekly","start":"%sT09:00:00","end":"%sT09:30:00","timeZone":"America/Los_Angeles","rrule":"FREQ=WEEKLY"}' "$week1" "$week1" >"$work/body.json"
   run post --cal "$cal" --body-file "$work/body.json"
   wrev=$(field 'd["rev"]')
@@ -174,7 +161,6 @@ for feed in plain seal; do
   check "$feed: changes show the exdate" "$(changes_exdates "$feed" weekly)" "['${week2}T09:00:00']"
 done
 
-# A plain feed drops exactly that occurrence, in the series' zone.
 check "plain: feed has the exdate" "$(curl -s "$(sub plain)" | grep -c "^EXDATE;TZID=America/Los_Angeles:${week2//-/}T090000")" "1"
 check "seal: feed shows only the seal" "$(curl -s "$(sub seal)" | grep -c '^EXDATE')" "0"
 
@@ -184,10 +170,8 @@ check "ics on another feed exits 3" "$?" "3"
 run list --cal nope
 check "unknown calendar" "$(cat "$work/out")" "ERROR:No Agent Cloud calendar"
 
-# bin/sd-calendar syncs both calendars through the script, not the ICS feed.
 cal_bin="${SD_CALENDAR_BIN:-$here/../bin/sd-calendar}"
 export XDG_STATE_HOME="$work/state"
-# A build outside bin/ cannot find ../scripts on its own.
 [[ -n ${SD_CALENDAR_BIN-} ]] && export SD_CALENDAR_CLOUD_SCRIPT="$script"
 sd() { PATH="$work/bin:$PATH" XDG_RUNTIME_DIR="$work/run" CLOUD_CONFIG="$work/creds.json" AGENTCLOUD_BIN="$BIN" "$cal_bin" "$@" >"$work/out" 2>"$work/err"; }
 for feed in plain seal; do
@@ -214,7 +198,6 @@ for cal in ("plain", "seal"):
     keys = {e["dateKey"] for e in rows}
     print(cal, sys.argv[2] in keys, sys.argv[3] in keys, sys.argv[4] in keys, all(e.get("repeats") for e in rows))' "$store" "$w1" "$w2" "$w3" | tr '\n' ' ')" "plain True False True True seal True False True True "
 
-# Deleting all dates still deletes the series.
 for feed in plain seal; do
   cal=$(cat "$work/$feed.id")
   run list --cal "$cal"
@@ -236,7 +219,6 @@ check "no key or token in curl argv" "$(grep -cF -f "$work/secrets" "$work/curl-
 check "no key or token on stdout" "$(grep -cF -f "$work/secrets" "$work/all-out")" "0"
 check "temp files removed" "$(find "$work/run" -mindepth 1 | wc -l | tr -d ' ')" "0"
 
-# The sealed event never reached the server as plaintext; a plain one does.
 printf '{"summary":"sealed words","start":"%s"}' "$d1" >"$work/body.json"
 run post --cal "$(cat "$work/seal.id")" --body-file "$work/body.json"
 check "sealed post opens" "$(field 'd["sealed"]')" "True"
