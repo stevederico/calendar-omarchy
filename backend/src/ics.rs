@@ -519,7 +519,7 @@ fn weekday(c: Civil) -> i32 {
     (4 + ordinal(c)).rem_euclid(7)
 }
 
-pub fn today_ordinal() -> i32 {
+pub fn local_today_ordinal() -> i32 {
     if let Ok(out) = std::process::Command::new("date")
         .args(["+%Y-%m-%d"])
         .output()
@@ -543,7 +543,7 @@ pub fn today_ordinal() -> i32 {
 }
 
 pub fn window() -> (i32, i32) {
-    let today = today_ordinal();
+    let today = local_today_ordinal();
     (today - 40, today + 200)
 }
 
