@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::{Command, ExitCode, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use store::{Calendar, Event, LOCAL_COLOR, LOCAL_ID, Store};
+use store::{Calendar, Event, Store, LOCAL_COLOR, LOCAL_ID};
 
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
@@ -99,7 +99,9 @@ fn cmd_calendars() -> Result<(), String> {
         writeln!(
             io::stdout(),
             "{mark}  {}  {}  {kind}  {}",
-            cal.id, cal.color, cal.name
+            cal.id,
+            cal.color,
+            cal.name
         )
         .map_err(io_err)?;
     }
@@ -343,7 +345,9 @@ fn sync_one(store: &mut Store, id: &str) -> Result<usize, String> {
 }
 
 fn cloud_script() -> Option<PathBuf> {
-    if let Some(path) = env::var_os("SD_CALENDAR_CLOUD_SCRIPT").or_else(|| env::var_os("SD_CALENDAR_ALMANAC_SCRIPT")) {
+    if let Some(path) = env::var_os("SD_CALENDAR_CLOUD_SCRIPT")
+        .or_else(|| env::var_os("SD_CALENDAR_ALMANAC_SCRIPT"))
+    {
         let path = PathBuf::from(path);
         return path.is_file().then_some(path);
     }

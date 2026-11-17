@@ -26,7 +26,8 @@ fn mode(path: &Path) -> u32 {
 }
 
 #[test]
-fn subscribe_hands_the_feed_url_to_curl_and_the_cloud_script_on_stdin_and_stores_0600_under_0700_dirs() {
+fn subscribe_hands_the_feed_url_to_curl_and_the_cloud_script_on_stdin_and_stores_0600_under_0700_dirs(
+) {
     let dir = scratch();
     let d = dir.display();
     write_exe(
@@ -39,7 +40,11 @@ fn subscribe_hands_the_feed_url_to_curl_and_the_cloud_script_on_stdin_and_stores
         &dir.join("cloud.sh"),
         &format!("printf '%s\\n' \"$@\" >'{d}/cloud-argv'\ncat >'{d}/cloud-stdin'\nexit 3\n"),
     );
-    let path = format!("{}:{}", dir.join("bin").display(), std::env::var("PATH").unwrap_or_default());
+    let path = format!(
+        "{}:{}",
+        dir.join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     let out = Command::new(env!("CARGO_BIN_EXE_sd-calendar"))
         .args(["subscribe", "Feed", FEED_URL])
         .env("PATH", path)
@@ -55,14 +60,25 @@ fn subscribe_hands_the_feed_url_to_curl_and_the_cloud_script_on_stdin_and_stores
     let cloud_argv = read("cloud-argv");
     let cloud_stdin = read("cloud-stdin");
     let store = dir.join("state/omarchy/sd-calendar.json");
-    let modes = (mode(&dir.join("state")), mode(&dir.join("state/omarchy")), mode(&store));
+    let modes = (
+        mode(&dir.join("state")),
+        mode(&dir.join("state/omarchy")),
+        mode(&store),
+    );
     let _ = fs::remove_dir_all(&dir);
 
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(cloud_argv, "ics\n");
     assert_eq!(cloud_stdin, format!("{FEED_URL}\n"));
     assert!(curl_argv.contains("-K\n-\n"), "{curl_argv}");
-    assert!(!curl_argv.contains("SECRET-TOKEN-123"), "feed url reached curl argv: {curl_argv}");
+    assert!(
+        !curl_argv.contains("SECRET-TOKEN-123"),
+        "feed url reached curl argv: {curl_argv}"
+    );
     assert_eq!(
         curl_stdin,
         "url = \"https://feeds.example.test/cal.ics?token=SECRET-TOKEN-123&q=a\\\"b\"\n"

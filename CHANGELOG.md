@@ -1,3 +1,7 @@
+0.15.0
+
+  Format Rust backend
+
 0.14.0
 
   Add invariant tests

@@ -98,7 +98,11 @@ fn parse_vevents(ics: &str) -> Vec<RawEvent> {
             cur = Some(RawEvent {
                 uid: String::new(),
                 title: "Untitled".into(),
-                start: Civil { y: 1970, m: 1, d: 1 },
+                start: Civil {
+                    y: 1970,
+                    m: 1,
+                    d: 1,
+                },
                 end: None,
                 all_day: false,
                 start_hm: String::new(),
@@ -161,7 +165,11 @@ fn apply_dt(event: &mut RawEvent, params: &str, value: &str, start: bool) {
 }
 
 fn parse_ics_date(value: &str) -> Option<Civil> {
-    let digits: String = value.chars().filter(|c| c.is_ascii_digit()).take(8).collect();
+    let digits: String = value
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .take(8)
+        .collect();
     if digits.len() < 8 {
         return None;
     }
@@ -284,8 +292,8 @@ fn expand(raw: &RawEvent, window_start: i32, window_end: i32) -> Vec<(i32, Civil
         if rrule.count.is_some_and(|c| seen >= c) {
             break;
         }
-        let weekday_ok = rrule.byday.is_empty()
-            || rrule.byday.iter().any(|d| d.weekday == weekday(cursor));
+        let weekday_ok =
+            rrule.byday.is_empty() || rrule.byday.iter().any(|d| d.weekday == weekday(cursor));
         if ord >= window_start && ord >= start_ord && weekday_ok {
             out.push((ord, cursor));
             seen += 1;
@@ -432,7 +440,11 @@ fn split_prop(line: &str) -> (String, String, String) {
         Some((n, p)) => (n, p),
         None => (head, ""),
     };
-    (name.to_ascii_uppercase(), params.to_string(), value.to_string())
+    (
+        name.to_ascii_uppercase(),
+        params.to_string(),
+        value.to_string(),
+    )
 }
 
 fn unescape_ics(s: &str) -> String {
@@ -620,8 +632,16 @@ UID:dentist\n\
 DTSTART:20261008T090000\n\
 SUMMARY:Dentist\n\
 END:VEVENT\n";
-        let start = ordinal(Civil { y: 2026, m: 10, d: 1 });
-        let end = ordinal(Civil { y: 2026, m: 10, d: 31 });
+        let start = ordinal(Civil {
+            y: 2026,
+            m: 10,
+            d: 1,
+        });
+        let end = ordinal(Civil {
+            y: 2026,
+            m: 10,
+            d: 31,
+        });
         let events = events_from_ics(ics, "a", "#5b9fd4", start, end);
         let keys = |uid: &str| -> Vec<(String, bool)> {
             events

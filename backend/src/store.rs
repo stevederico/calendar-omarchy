@@ -34,8 +34,8 @@ pub const LOCAL_ID: &str = "local";
 pub const LOCAL_COLOR: &str = "#c4a574";
 
 pub const PALETTE: &[&str] = &[
-    "#5b9fd4", "#e07a5f", "#81b29a", "#f2cc8f", "#9b8ec4", "#e9c46a",
-    "#c4a574", "#d67b7b", "#6bb3b3", "#c47ba0",
+    "#5b9fd4", "#e07a5f", "#81b29a", "#f2cc8f", "#9b8ec4", "#e9c46a", "#c4a574", "#d67b7b",
+    "#6bb3b3", "#c47ba0",
 ];
 
 impl Default for Store {
